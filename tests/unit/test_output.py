@@ -5,7 +5,7 @@ from tvcli.output import build_envelope, emit, envelope_from_error, render_table
 
 
 def test_build_envelope_contains_schema_version() -> None:
-    payload = build_envelope(command="version", data={"version": "0.5.0"})
+    payload = build_envelope(command="version", data={"version": "1.0.0"})
 
     assert payload["schema_version"] == 1
     assert payload["ok"] is True
@@ -13,7 +13,7 @@ def test_build_envelope_contains_schema_version() -> None:
 
 
 def test_render_table_formats_mappings() -> None:
-    rendered = render_table({"name": "tvcli", "version": "0.5.0"})
+    rendered = render_table({"name": "tvcli", "version": "1.0.0"})
 
     assert "name" in rendered
     assert "tvcli" in rendered
@@ -22,7 +22,7 @@ def test_render_table_formats_mappings() -> None:
 def test_emit_json_mode() -> None:
     stream = StringIO()
     emit(
-        build_envelope(command="version", data={"version": "0.5.0"}),
+        build_envelope(command="version", data={"version": "1.0.0"}),
         json_mode=True,
         stream=stream,
     )

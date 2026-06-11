@@ -14,7 +14,12 @@ import typer
 from ..errors import TvcliError
 from ..layers import ohlcv
 from ..output import build_envelope
-from ._helpers import resolve_json_mode, run_command
+from ._helpers import (
+    resolve_json_mode,
+    resolve_retry_policy,
+    run_command,
+    run_with_retries,
+)
 
 app = typer.Typer(add_completion=False, help="OHLCV commands")
 
@@ -67,7 +72,13 @@ def get(
 ) -> None:
     json_mode = resolve_json_mode(ctx, json_mode)
     request = ohlcv.OhlcvRequest(symbol=symbol, interval=interval, bars=bars)
-    result = ohlcv.build_ohlcv_payload(request, fetch_history_query(request))
+    retries, backoff_seconds = resolve_retry_policy(ctx)
+    history = run_with_retries(
+        lambda: fetch_history_query(request),
+        retries=retries,
+        backoff_seconds=backoff_seconds,
+    )
+    result = ohlcv.build_ohlcv_payload(request, history)
     payload = build_envelope(command="ohlcv.get", data=result)
     if json_mode:
         from ..output import emit
@@ -90,7 +101,12 @@ def export(
 
     def handler() -> dict[str, Any]:
         request = ohlcv.OhlcvRequest(symbol=symbol, interval=interval, bars=bars)
-        history = fetch_history_query(request)
+        retries, backoff_seconds = resolve_retry_policy(ctx)
+        history = run_with_retries(
+            lambda: fetch_history_query(request),
+            retries=retries,
+            backoff_seconds=backoff_seconds,
+        )
         out.parent.mkdir(parents=True, exist_ok=True)
         if out.suffix.lower() == ".parquet":
             try:

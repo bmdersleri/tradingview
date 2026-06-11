@@ -171,7 +171,7 @@ def validate_session(record: SessionRecord, timeout: float = 15.0) -> SessionSta
         with httpx.Client(
             follow_redirects=True,
             timeout=timeout,
-            headers={"User-Agent": "tvcli/0.5.0"},
+            headers={"User-Agent": "tvcli/1.0.0"},
             cookies=cookie_jar(record),
         ) as client:
             response = client.get(

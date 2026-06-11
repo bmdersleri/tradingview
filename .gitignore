@@ -3,9 +3,9 @@ __pycache__/
 .pytest_cache/
 .ruff_cache/
 .mypy_cache/
+.codegraph/
 build/
 dist/
 *.egg-info/
 *.sqlite3
 *.db
-

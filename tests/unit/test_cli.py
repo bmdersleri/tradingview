@@ -13,7 +13,7 @@ def test_version_command_emits_json(monkeypatch, tmp_path: Path) -> None:
 
     assert result.exit_code == 0
     assert '"command": "version"' in result.output
-    assert '"version": "0.5.0"' in result.output
+    assert '"version": "1.0.0"' in result.output
 
 
 def test_cache_commands_use_default_state_path(monkeypatch, tmp_path: Path) -> None:

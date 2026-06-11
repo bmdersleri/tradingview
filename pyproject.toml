@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "tvcli"
-version = "0.5.0"
+version = "1.0.0"
 description = "TradingView CLI toolkit"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -24,6 +24,7 @@ browser = ["playwright>=1.44"]
 serve = ["fastapi>=0.110", "uvicorn>=0.29"]
 market = ["tradingview-screener", "tradingview-ta"]
 parquet = ["pandas>=2.2", "pyarrow>=16"]
+mcp = ["mcp>=1.2"]
 dev = [
   "pytest>=9",
   "pytest-asyncio>=1.0",

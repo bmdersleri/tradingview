@@ -12,7 +12,7 @@ This repository currently contains planning documents for `tvcli`, a Python 3.11
 
 ## Build, Test, and Development Commands
 
-Once the scaffold exists, use the planned `justfile` targets:
+Use the existing `justfile` targets:
 
 - `just install`: install editable package with dev, browser, and serve extras, then install Chromium.
 - `just lint`: run `ruff check`, `ruff format --check`, and strict `mypy` on `src`.
@@ -32,7 +32,7 @@ Use `pytest`, `pytest-asyncio`, `respx`, and fixtures for offline coverage. Netw
 
 ## Commit & Pull Request Guidelines
 
-The plan requires Conventional Commits: `feat:`, `fix:`, `test:`, `docs:`, `refactor:`, or `chore:`, with scopes where helpful, such as `feat(ta): add matrix command`. This directory is not currently a git repository, so preserve that convention when history is created.
+The commit history follows Conventional Commits: `feat:`, `fix:`, `test:`, `docs:`, `refactor:`, or `chore:`, with scopes where helpful, such as `feat(ta): add matrix command`.
 
 Pull requests should summarize the behavioral change, list validation commands run, link related issues or phases, and include screenshots only for chart/UI-visible changes. Do not merge with `just lint` or `just test` failing.
 

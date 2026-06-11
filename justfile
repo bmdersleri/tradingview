@@ -12,3 +12,6 @@ test:
 
 test-live:
 	python3 -m pytest -m network -v
+
+audit:
+	! rg -n "sessionid=" tests/fixtures docs contrib .claude
