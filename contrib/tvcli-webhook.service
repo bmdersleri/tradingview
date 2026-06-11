@@ -1,0 +1,15 @@
+[Unit]
+Description=tvcli TradingView webhook receiver
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+EnvironmentFile=-/etc/default/tvcli-webhook
+Environment=TVCLI_WEBHOOK_SINK=stdout
+ExecStart=/usr/bin/env tvcli serve webhook --port 8787 --secret $TVCLI_WEBHOOK_SECRET --sink $TVCLI_WEBHOOK_SINK --telegram-token $TVCLI_TELEGRAM_TOKEN --telegram-chat-id $TVCLI_TELEGRAM_CHAT_ID
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

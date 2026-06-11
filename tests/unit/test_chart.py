@@ -1,0 +1,76 @@
+from __future__ import annotations
+
+from pathlib import Path
+
+from typer.testing import CliRunner
+
+from tvcli.cli import app
+from tvcli.layers.chart import chart_url, wait_for_canvas_stability
+
+
+class FakeLocator:
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def count(self) -> int:
+        return 1
+
+    @property
+    def first(self) -> FakeLocator:
+        return self
+
+    def screenshot(self) -> bytes:
+        self.calls += 1
+        return b"stable"
+
+
+class FakePage:
+    def __init__(self) -> None:
+        self.loc = FakeLocator()
+        self.waits = 0
+
+    def locator(self, selector: str) -> FakeLocator:
+        return self.loc
+
+    def wait_for_timeout(self, ms: int) -> None:
+        self.waits += 1
+
+
+def test_chart_url_and_canvas_stability() -> None:
+    assert "symbol=BIST:THYAO" in chart_url("BIST:THYAO", "1d")
+
+    page = FakePage()
+    wait_for_canvas_stability(page, timeout_ms=2000, sample_ms=10)
+
+    assert page.waits == 1
+
+
+def test_chart_shot_command_uses_layer(monkeypatch, tmp_path: Path) -> None:
+    out = tmp_path / "chart.png"
+    monkeypatch.setattr(
+        "tvcli.commands.chart.shot_query",
+        lambda request: {
+            "path": str(out),
+            "symbol": request.symbol,
+            "interval": request.interval,
+            "bytes": 123,
+        },
+    )
+
+    runner = CliRunner()
+    result = runner.invoke(
+        app,
+        [
+            "chart",
+            "shot",
+            "BIST:THYAO",
+            "--interval",
+            "1d",
+            "--out",
+            str(out),
+            "--json",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert '"command": "chart.shot"' in result.output

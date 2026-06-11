@@ -1,0 +1,11 @@
+{
+  "summary": {"recommendation": "BUY", "buy": 14, "neutral": 9, "sell": 3},
+  "oscillators": {"recommendation": "NEUTRAL", "buy": 4, "neutral": 6, "sell": 1},
+  "moving_averages": {"recommendation": "STRONG_BUY", "buy": 10, "neutral": 3, "sell": 2},
+  "indicators": {
+    "RSI": 56.2,
+    "MACD.macd": 1.23,
+    "MACD.signal": 0.98,
+    "close": 312.5
+  }
+}

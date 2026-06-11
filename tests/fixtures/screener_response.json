@@ -1,0 +1,21 @@
+{
+  "market": "turkey",
+  "total_matches": 412,
+  "rows": [
+    {
+      "ticker": "BIST:THYAO",
+      "name": "THYAO",
+      "close": 312.5,
+      "volume": 18234567,
+      "RSI": 27.4,
+      "market_cap_basic": 431000000000
+    },
+    {
+      "exchange": "BIST",
+      "symbol": "AKBNK",
+      "name": "AKBNK",
+      "close": 45.1,
+      "volume": 9000000
+    }
+  ]
+}
