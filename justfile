@@ -13,7 +13,7 @@ test:
 	python3 -m pytest -m "not network" --cov=tvcli --cov-fail-under=80
 
 test-live:
-	bash -lc 'bash scripts/live_smoke.sh'
+	python3 -m pytest -m network -v
 
 audit:
 	! rg -n "sessionid=" tests/fixtures docs contrib .claude
