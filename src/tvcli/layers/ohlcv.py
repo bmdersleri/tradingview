@@ -128,19 +128,10 @@ def _extract_bars(value: Any) -> list[OhlcvBar]:
             bars.extend(_extract_bars(child))
         return bars
     if isinstance(value, (list, tuple)):
-        if _is_bar_candidate(value):
-            stamp, open_, high, low, close, volume = value[:6]
-            bars.append(
-                OhlcvBar(
-                    time=int(stamp),
-                    open=float(open_),
-                    high=float(high),
-                    low=float(low),
-                    close=float(close),
-                    volume=float(volume),
-                )
-            )
-            return bars
+        # Bars only ever arrive wrapped as {"v": [...]} entries (handled above).
+        # A bare numeric list at this level is the timescale frame's time axis
+        # ([t0, t1, t2, ...]); treating it as a bar produced a phantom first bar
+        # whose price columns were the next bars' timestamps. Recurse only.
         for child in value:
             bars.extend(_extract_bars(child))
     return bars

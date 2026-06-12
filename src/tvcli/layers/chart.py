@@ -11,7 +11,7 @@ from shutil import which
 from typing import Any
 
 from ..auth.session import require_session
-from ..errors import BrowserError, CaptchaDetectedError
+from ..errors import BrowserError, CaptchaDetectedError, UsageError
 
 DEFAULT_CHROMIUM_ARGS = ("--disable-blink-features=AutomationControlled",)
 SELECTORS = {
@@ -146,15 +146,6 @@ def wait_for_canvas_stability(
     )
 
 
-def _add_studies(page: Any, studies: tuple[str, ...]) -> None:
-    if not studies:
-        return
-    # Best-effort: TradingView study UI is fragile. Keep the hook for later
-    # refinement without breaking the screenshot path.
-    with suppress(Exception):
-        page.keyboard.press("Alt+I")
-
-
 def _dismiss_chart_error_dialog(page: Any) -> bool:
     try:
         dialog = page.get_by_text(SELECTORS["chart_error_text"], exact=False)
@@ -247,7 +238,6 @@ def _open_chart_page(
                 "`tvcli auth import-cookie`."
             ),
         )
-    _add_studies(page, request.studies)
     chart_error_dismissed = _dismiss_chart_error_dialog(page)
     wait_for_canvas_stability(page, timeout_ms=timeout_ms)
     return page, chart_error_dismissed
@@ -262,6 +252,14 @@ def _capture_chart(page: Any, out: Path, *, chart_error_dismissed: bool) -> None
 
 
 def shot_chart(request: ChartRequest, timeout_ms: int = 15_000) -> dict[str, Any]:
+    if request.studies:
+        raise UsageError(
+            "`chart shot` does not draw indicator overlays.",
+            hint=(
+                "Use `tvcli chart analyze --indicator wma:200 ...` to render "
+                "indicators on the chart."
+            ),
+        )
     record = require_session()
     sync_playwright = _load_playwright()
     request.out.parent.mkdir(parents=True, exist_ok=True)

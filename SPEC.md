@@ -352,9 +352,14 @@ the `unauthorized_user_token` but must degrade gracefully.
 
 | Command | Description |
 |---------|-------------|
-| `chart shot SYMBOL --interval 1d [--studies RSI,MACD] [--theme dark] [--width 1600 --height 900] --out chart.png` | Open `https://www.tradingview.com/chart/?symbol=...` in headless Chromium with stored `storage_state`, set interval via keyboard shortcut / URL param, add studies via UI if requested, wait for chart canvas stable, screenshot the chart container element. |
+| `chart shot SYMBOL --interval 1d [--theme dark] [--width 1600 --height 900] --out chart.png` | Open `https://www.tradingview.com/chart/?symbol=...` in headless Chromium with stored `storage_state`, set interval via keyboard shortcut / URL param, wait for chart canvas stable, screenshot the chart container element. Falls back to an anonymous context when the authenticated layout renders a blank canvas. |
+| `chart analyze SYMBOL --interval 1d --indicator wma:200 [--indicator rsi:14 ...] [--bars 500] [--theme dark] [--width 1600 --height 900] --out chart.png` | Fetch OHLCV history (`ohlcv` layer), compute indicators locally, and render a matplotlib chart: price plus overlays (sma/ema/wma/bbands) on the main panel, oscillators (rsi/macd) in stacked subpanels. No browser required. |
 
-JSON output: `{"path": "/abs/path/chart.png", "symbol": "...", "interval": "...", "bytes": 182345}`.
+JSON output (`shot`): `{"path": "/abs/path/chart.png", "symbol": "...", "interval": "...", "bytes": 182345, "anonymous_fallback": false}`.
+
+JSON output (`analyze`): `{"symbol": "...", "interval": "...", "bars": 399, "indicators": [{"spec": "wma:200", "kind": "wma", "period": 200, "last": 299.37}], "path": "/abs/path/chart.png", "bytes": 115665}`.
+
+Indicator spec syntax: `NAME[:p1[:p2[:p3]]]` — `sma:50`, `ema:20`, `wma:200`, `bbands:20:2`, `rsi:14`, `macd:12:26:9`. An unknown name or bad parameter exits 2 with the offending spec in the hint. `chart shot --studies` is not supported (exit 2) — use `chart analyze` for overlays.
 
 Implementation notes:
 - Use a single persistent `BrowserContext` from `storage_state.json`.

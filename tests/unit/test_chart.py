@@ -98,3 +98,70 @@ def test_chart_shot_command_uses_layer(monkeypatch, tmp_path: Path) -> None:
 
     assert result.exit_code == 0
     assert '"command": "chart.shot"' in result.output
+
+
+def test_chart_analyze_command_uses_layer(monkeypatch, tmp_path: Path) -> None:
+    out = tmp_path / "chart.png"
+    monkeypatch.setattr(
+        "tvcli.commands.chart.analyze_query",
+        lambda request: {
+            "symbol": request.symbol,
+            "interval": request.interval,
+            "bars": 399,
+            "indicators": [
+                {"spec": s, "kind": s.split(":")[0], "period": 200, "last": 1.0}
+                for s in request.indicators
+            ],
+            "path": str(out),
+            "bytes": 456,
+        },
+    )
+
+    runner = CliRunner()
+    result = runner.invoke(
+        app,
+        [
+            "chart",
+            "analyze",
+            "BIST:THYAO",
+            "--indicator",
+            "wma:200",
+            "--indicator",
+            "rsi:14",
+            "--out",
+            str(out),
+            "--json",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert '"command": "chart.analyze"' in result.output
+    assert '"wma:200"' in result.output
+    assert '"rsi:14"' in result.output
+
+
+def test_chart_shot_rejects_studies(monkeypatch, tmp_path: Path) -> None:
+    # --studies is not supported on `shot`; it must fail fast (exit 2) before any
+    # browser work and point the user at `chart analyze`.
+    monkeypatch.setattr(
+        "tvcli.layers.chart.require_session",
+        lambda: (_ for _ in ()).throw(AssertionError("session must not be touched")),
+    )
+    runner = CliRunner()
+    result = runner.invoke(
+        app,
+        [
+            "chart",
+            "shot",
+            "BIST:THYAO",
+            "--studies",
+            "RSI,MACD",
+            "--out",
+            str(tmp_path / "x.png"),
+            "--json",
+        ],
+    )
+
+    assert result.exit_code == 2
+    assert '"ok": false' in result.output
+    assert "chart analyze" in result.output
