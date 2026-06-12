@@ -108,6 +108,8 @@ def test_chart_analyze_command_uses_layer(monkeypatch, tmp_path: Path) -> None:
             "symbol": request.symbol,
             "interval": request.interval,
             "bars": 399,
+            "style": request.style,
+            "volume": request.volume,
             "indicators": [
                 {"spec": s, "kind": s.split(":")[0], "period": 200, "last": 1.0}
                 for s in request.indicators
@@ -128,6 +130,9 @@ def test_chart_analyze_command_uses_layer(monkeypatch, tmp_path: Path) -> None:
             "wma:200",
             "--indicator",
             "rsi:14",
+            "--style",
+            "line",
+            "--no-volume",
             "--out",
             str(out),
             "--json",
@@ -138,6 +143,8 @@ def test_chart_analyze_command_uses_layer(monkeypatch, tmp_path: Path) -> None:
     assert '"command": "chart.analyze"' in result.output
     assert '"wma:200"' in result.output
     assert '"rsi:14"' in result.output
+    assert '"style": "line"' in result.output
+    assert '"volume": false' in result.output
 
 
 def test_chart_shot_rejects_studies(monkeypatch, tmp_path: Path) -> None:

@@ -72,6 +72,8 @@ def analyze_command(
         ),
     ] = None,
     bars: Annotated[int, typer.Option("--bars")] = 500,
+    style: Annotated[str, typer.Option("--style", help="candle or line")] = "candle",
+    volume: Annotated[bool, typer.Option("--volume/--no-volume")] = True,
     theme: Annotated[str, typer.Option("--theme")] = "dark",
     width: Annotated[int, typer.Option("--width")] = 1600,
     height: Annotated[int, typer.Option("--height")] = 900,
@@ -87,6 +89,8 @@ def analyze_command(
         width=width,
         height=height,
         theme=theme,
+        style=style,
+        volume=volume,
     )
 
     def handler() -> dict[str, Any]:

@@ -54,6 +54,53 @@ def test_run_analysis_renders_png(monkeypatch, tmp_path: Path) -> None:
     assert wma["last"] is not None
 
 
+def test_run_analysis_default_candle_and_volume(monkeypatch, tmp_path: Path) -> None:
+    out = tmp_path / "candle.png"
+    monkeypatch.setattr(
+        "tvcli.layers.analyze.fetch_bars_query", lambda request: _fake_bars()
+    )
+    payload = analyze.run_analysis(
+        analyze.AnalyzeRequest(
+            symbol="X:Y", interval="1d", out=out, indicators=("wma:10",)
+        )
+    )
+    assert payload["style"] == "candle"
+    assert payload["volume"] is True
+    assert out.read_bytes()[:8] == b"\x89PNG\r\n\x1a\n"
+
+
+def test_run_analysis_line_without_volume(monkeypatch, tmp_path: Path) -> None:
+    out = tmp_path / "line.png"
+    monkeypatch.setattr(
+        "tvcli.layers.analyze.fetch_bars_query", lambda request: _fake_bars()
+    )
+    payload = analyze.run_analysis(
+        analyze.AnalyzeRequest(
+            symbol="X:Y",
+            interval="1d",
+            out=out,
+            indicators=("ema:10", "macd:12:26:9"),
+            style="line",
+            volume=False,
+        )
+    )
+    assert payload["style"] == "line"
+    assert payload["volume"] is False
+    assert out.exists()
+
+
+def test_run_analysis_rejects_bad_style(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(
+        "tvcli.layers.analyze.fetch_bars_query", lambda request: _fake_bars()
+    )
+    with pytest.raises(UsageError):
+        analyze.run_analysis(
+            analyze.AnalyzeRequest(
+                symbol="X:Y", interval="1d", out=tmp_path / "x.png", style="heikin"
+            )
+        )
+
+
 def test_run_analysis_defaults_to_wma200(monkeypatch, tmp_path: Path) -> None:
     out = tmp_path / "default.png"
     monkeypatch.setattr(
