@@ -9,3 +9,4 @@ dist/
 *.egg-info/
 *.sqlite3
 *.db
+.coverage

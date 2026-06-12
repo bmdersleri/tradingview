@@ -167,51 +167,148 @@ def _dismiss_chart_error_dialog(page: Any) -> bool:
         return False
 
 
+# Below this fraction of non-background pixels the chart drawing area is treated
+# as empty. A real candle chart easily clears it; an authenticated account layout
+# that fails to render leaves a near-uniform canvas well under the threshold.
+BLANK_CANVAS_CONTENT_RATIO = 0.002
+
+# Runs in the page: samples every 2d canvas and returns the highest fraction of
+# pixels that differ from the top-left (background) pixel. WebGL canvases and
+# tainted/unreadable canvases are skipped rather than failing the whole check.
+_CANVAS_CONTENT_JS = """
+() => {
+  const canvases = Array.from(document.querySelectorAll('canvas'));
+  let best = 0;
+  for (const c of canvases) {
+    const w = c.width, h = c.height;
+    if (!w || !h) continue;
+    let ctx;
+    try { ctx = c.getContext('2d'); } catch (e) { ctx = null; }
+    if (!ctx) continue;
+    let data;
+    try { data = ctx.getImageData(0, 0, w, h).data; } catch (e) { continue; }
+    if (!data.length) continue;
+    const step = Math.max(1, Math.floor((w * h) / 20000)) * 4;
+    const br = data[0], bg = data[1], bb = data[2];
+    let nonEmpty = 0, total = 0;
+    for (let i = 0; i < data.length; i += step) {
+      total++;
+      if (data[i + 3] === 0) continue;
+      const diff = Math.abs(data[i] - br) + Math.abs(data[i + 1] - bg)
+        + Math.abs(data[i + 2] - bb);
+      if (diff > 24) nonEmpty++;
+    }
+    if (total) best = Math.max(best, nonEmpty / total);
+  }
+  return best;
+}
+"""
+
+
+def _canvas_content_ratio(page: Any) -> float | None:
+    try:
+        value = page.evaluate(_CANVAS_CONTENT_JS)
+    except Exception:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _canvas_looks_blank(page: Any) -> bool:
+    ratio = _canvas_content_ratio(page)
+    # An unreadable canvas (ratio is None) is left alone: we never trigger the
+    # anonymous fallback unless we can positively measure an empty drawing area.
+    if ratio is None:
+        return False
+    return ratio < BLANK_CANVAS_CONTENT_RATIO
+
+
+def _open_chart_page(
+    context: Any,
+    request: ChartRequest,
+    timeout_ms: int,
+    *,
+    check_login_wall: bool,
+) -> tuple[Any, bool]:
+    page = context.new_page()
+    page.goto(
+        chart_url(request.symbol, request.interval, request.theme),
+        wait_until="domcontentloaded",
+    )
+    with suppress(Exception):
+        page.wait_for_load_state("networkidle", timeout=timeout_ms)
+    if check_login_wall and _looks_like_login_wall(page):
+        raise CaptchaDetectedError(
+            "TradingView requested re-authentication.",
+            hint=(
+                "Refresh the session with `tvcli auth login` or "
+                "`tvcli auth import-cookie`."
+            ),
+        )
+    _add_studies(page, request.studies)
+    chart_error_dismissed = _dismiss_chart_error_dialog(page)
+    wait_for_canvas_stability(page, timeout_ms=timeout_ms)
+    return page, chart_error_dismissed
+
+
+def _capture_chart(page: Any, out: Path, *, chart_error_dismissed: bool) -> None:
+    locator = page.locator(SELECTORS["chart_canvas"])
+    if locator.count() and not chart_error_dismissed:
+        locator.first.screenshot(path=str(out))
+    else:
+        page.screenshot(path=str(out), full_page=True)
+
+
 def shot_chart(request: ChartRequest, timeout_ms: int = 15_000) -> dict[str, Any]:
     record = require_session()
     sync_playwright = _load_playwright()
     request.out.parent.mkdir(parents=True, exist_ok=True)
+    config = BrowserSessionConfig(
+        headless=True,
+        width=request.width,
+        height=request.height,
+    )
     with sync_playwright() as playwright:
         browser = None
-        browser, context = create_browser_context(
-            playwright,
-            storage_state_path=record.storage_state_path,
-            config=BrowserSessionConfig(
-                headless=True,
-                width=request.width,
-                height=request.height,
-            ),
-        )
+        anonymous_fallback = False
         try:
-            page = context.new_page()
-            page.goto(
-                chart_url(request.symbol, request.interval, request.theme),
-                wait_until="domcontentloaded",
+            # Attempt 1: the authenticated layout via the saved storage_state.
+            browser, context = create_browser_context(
+                playwright,
+                storage_state_path=record.storage_state_path,
+                config=config,
             )
-            with suppress(Exception):
-                page.wait_for_load_state("networkidle", timeout=timeout_ms)
-            if _looks_like_login_wall(page):
-                raise CaptchaDetectedError(
-                    "TradingView requested re-authentication.",
-                    hint=(
-                        "Refresh the session with `tvcli auth login` or "
-                        "`tvcli auth import-cookie`."
-                    ),
+            page, chart_error_dismissed = _open_chart_page(
+                context, request, timeout_ms, check_login_wall=True
+            )
+            if _canvas_looks_blank(page):
+                # The account layout rendered an empty drawing area. Retry once
+                # in an anonymous context, which loads the public chart that is
+                # known to render candles for the same symbol.
+                with suppress(Exception):
+                    browser.close()
+                browser, context = create_browser_context(
+                    playwright,
+                    storage_state_path=None,
+                    config=config,
                 )
-            _add_studies(page, request.studies)
-            chart_error_dismissed = _dismiss_chart_error_dialog(page)
-            wait_for_canvas_stability(page, timeout_ms=timeout_ms)
-            locator = page.locator(SELECTORS["chart_canvas"])
-            if locator.count() and not chart_error_dismissed:
-                locator.first.screenshot(path=str(request.out))
-            else:
-                page.screenshot(path=str(request.out), full_page=True)
+                anonymous_fallback = True
+                page, chart_error_dismissed = _open_chart_page(
+                    context, request, timeout_ms, check_login_wall=False
+                )
+            _capture_chart(
+                page, request.out, chart_error_dismissed=chart_error_dismissed
+            )
             return {
                 "path": str(request.out.resolve()),
                 "symbol": request.symbol,
                 "interval": request.interval,
                 "bytes": request.out.stat().st_size,
+                "anonymous_fallback": anonymous_fallback,
             }
         finally:
-            if browser is not None:
-                browser.close()
+            with suppress(Exception):
+                if browser is not None:
+                    browser.close()
