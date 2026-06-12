@@ -51,6 +51,10 @@ def test_fetch_history_success(monkeypatch, tmp_path: Path) -> None:
     ws = FakeWebSocket([timescale, completed])
     monkeypatch.setattr("tvcli.layers.ohlcv.require_session", lambda: record)
     monkeypatch.setattr(
+        "tvcli.layers.ohlcv._capture_chart_auth_token",
+        lambda _record, _request: "chart-token",
+    )
+    monkeypatch.setattr(
         "tvcli.layers.ohlcv._load_websocket",
         lambda: SimpleNamespace(create_connection=lambda *args, **_kwargs: ws),
     )

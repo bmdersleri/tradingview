@@ -1,3 +1,5 @@
+set shell := ["bash", "-lc"]
+
 install:
 	pip install -e ".[dev,browser,serve,market]" && playwright install chromium
 
@@ -11,7 +13,7 @@ test:
 	python3 -m pytest -m "not network" --cov=tvcli --cov-fail-under=80
 
 test-live:
-	python3 -m pytest -m network -v
+	bash -lc 'bash scripts/live_smoke.sh'
 
 audit:
 	! rg -n "sessionid=" tests/fixtures docs contrib .claude

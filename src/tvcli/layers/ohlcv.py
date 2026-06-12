@@ -7,6 +7,7 @@ import json
 import time
 from collections.abc import Mapping
 from dataclasses import asdict, dataclass
+from shutil import which
 from typing import Any, cast
 
 from ..auth.session import require_session
@@ -173,9 +174,8 @@ def build_request_messages(
     chart_session = "cs_tvcli"
     series_id = "s1"
     symbol_payload = {
-        "symbol": symbol,
         "adjustment": "splits",
-        "session": "regular",
+        "symbol": symbol,
     }
     return (
         encode_frame({"m": "set_auth_token", "p": [sessionid]}),
@@ -186,7 +186,7 @@ def build_request_messages(
                 "p": [
                     chart_session,
                     "symbol_1",
-                    json.dumps(symbol_payload, separators=(",", ":")),
+                    "=" + json.dumps(symbol_payload, separators=(",", ":")),
                 ],
             }
         ),
@@ -219,12 +219,92 @@ def _load_websocket() -> Any:
     return cast(Any, websocket)
 
 
+def _load_playwright() -> Any:
+    try:
+        module = importlib.import_module("playwright.sync_api")
+    except ImportError as exc:  # pragma: no cover - depends on optional extra
+        raise TvcliError(
+            "Playwright is unavailable for TradingView auth token capture.",
+            hint="Install the `browser` extra or run `just install`.",
+        ) from exc
+    return cast(Any, module).sync_playwright
+
+
+def _frame_text(frame: Any) -> str:
+    if isinstance(frame, str):
+        return frame
+    payload = getattr(frame, "payload", frame)
+    if isinstance(payload, bytes):
+        return payload.decode("utf-8", errors="ignore")
+    if isinstance(payload, str):
+        return payload
+    return ""
+
+
+def _capture_chart_auth_token(record: Any, request: OhlcvRequest) -> str:
+    if not record.storage_state_path.exists():
+        raise TvcliError(
+            "TradingView browser storage state is unavailable.",
+            hint="Run `tvcli auth import-cookie` or `tvcli auth login` first.",
+        )
+    sync_playwright = _load_playwright()
+    auth_token: str | None = None
+    with sync_playwright() as playwright:
+        launch_kwargs: dict[str, Any] = {
+            "headless": True,
+            "args": ["--disable-blink-features=AutomationControlled"],
+        }
+        if which("google-chrome") or which("google-chrome-stable"):
+            launch_kwargs["channel"] = "chrome"
+        browser = playwright.chromium.launch(**launch_kwargs)
+        try:
+            context = browser.new_context(
+                viewport={"width": 1600, "height": 900},
+                ignore_https_errors=True,
+                storage_state=str(record.storage_state_path),
+            )
+            page = context.new_page()
+
+            def on_websocket(ws: Any) -> None:
+                def on_frame(frame: Any) -> None:
+                    nonlocal auth_token
+                    for message in decode_frames(_frame_text(frame)):
+                        payload = parse_message(message)
+                        if (
+                            payload
+                            and payload.get("m") == "set_auth_token"
+                            and payload.get("p")
+                        ):
+                            auth_token = str(payload["p"][0])
+
+                ws.on("framesent", on_frame)
+
+            page.on("websocket", on_websocket)
+            url = (
+                "https://www.tradingview.com/chart/?"
+                f"symbol={request.symbol}&interval={request.interval}&theme=dark"
+            )
+            page.goto(url, wait_until="domcontentloaded", timeout=30_000)
+            deadline = time.monotonic() + 20
+            while auth_token is None and time.monotonic() < deadline:
+                page.wait_for_timeout(500)
+        finally:
+            browser.close()
+    if not auth_token:
+        raise TvcliError(
+            "Unable to capture TradingView chart auth token.",
+            hint="Refresh the browser session with `tvcli auth import-cookie`.",
+        )
+    return auth_token
+
+
 def fetch_history(request: OhlcvRequest, timeout: float = 15.0) -> tuple[OhlcvBar, ...]:
     record = require_session()
     websocket = _load_websocket()
+    auth_token = _capture_chart_auth_token(record, request)
     url = "wss://data.tradingview.com/socket.io/websocket"
     messages = build_request_messages(
-        sessionid=record.sessionid,
+        sessionid=auth_token,
         symbol=request.symbol,
         interval=request.interval,
         bars=request.bars,

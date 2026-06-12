@@ -13,7 +13,7 @@ import typer
 
 from ..errors import TvcliError
 from ..layers import ohlcv
-from ..output import build_envelope
+from ..output import build_envelope, emit, envelope_from_error
 from ._helpers import (
     resolve_json_mode,
     resolve_retry_policy,
@@ -72,17 +72,24 @@ def get(
 ) -> None:
     json_mode = resolve_json_mode(ctx, json_mode)
     request = ohlcv.OhlcvRequest(symbol=symbol, interval=interval, bars=bars)
-    retries, backoff_seconds = resolve_retry_policy(ctx)
-    history = run_with_retries(
-        lambda: fetch_history_query(request),
-        retries=retries,
-        backoff_seconds=backoff_seconds,
-    )
-    result = ohlcv.build_ohlcv_payload(request, history)
+
+    def handler() -> dict[str, Any]:
+        retries, backoff_seconds = resolve_retry_policy(ctx)
+        history = run_with_retries(
+            lambda: fetch_history_query(request),
+            retries=retries,
+            backoff_seconds=backoff_seconds,
+        )
+        return ohlcv.build_ohlcv_payload(request, history)
+
+    try:
+        result = handler()
+    except TvcliError as error:
+        emit(envelope_from_error("ohlcv.get", error), json_mode=json_mode)
+        raise typer.Exit(code=error.exit_code) from error
+
     payload = build_envelope(command="ohlcv.get", data=result)
     if json_mode:
-        from ..output import emit
-
         emit(payload, json_mode=True)
         return
     _write_human_output(format_name, payload)

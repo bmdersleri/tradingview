@@ -5,6 +5,7 @@ from pathlib import Path
 from typer.testing import CliRunner
 
 from tvcli.cli import app
+from tvcli.errors import TvcliError
 from tvcli.layers.ohlcv import OhlcvBar
 
 
@@ -51,3 +52,20 @@ def test_ohlcv_get_and_export(monkeypatch, tmp_path: Path) -> None:
     assert '"command": "ohlcv.get"' in get_result.output
     assert '"command": "ohlcv.export"' in export_result.output
     assert export_path.exists()
+
+
+def test_ohlcv_get_error_uses_json_envelope(monkeypatch) -> None:
+    def fail(_request):
+        raise TvcliError("WebSocket client is unavailable.", hint="Install dependency.")
+
+    monkeypatch.setattr("tvcli.commands.ohlcv.fetch_history_query", fail)
+
+    result = CliRunner().invoke(
+        app,
+        ["ohlcv", "get", "BIST:THYAO", "--interval", "1d", "--bars", "1", "--json"],
+    )
+
+    assert result.exit_code == 1
+    assert '"ok": false' in result.output
+    assert '"command": "ohlcv.get"' in result.output
+    assert "Traceback" not in result.output

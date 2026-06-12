@@ -32,6 +32,33 @@ class SessionStatus:
     expires_hint: str | None = None
 
 
+def storage_state_payload(record: SessionRecord) -> dict[str, Any]:
+    cookies = [
+        {
+            "name": name,
+            "value": value,
+            "domain": ".tradingview.com",
+            "path": "/",
+            "expires": -1,
+            "httpOnly": True,
+            "secure": True,
+            "sameSite": "Lax",
+        }
+        for name, value in cookie_jar(record).items()
+    ]
+    return {"cookies": cookies, "origins": []}
+
+
+def write_storage_state(record: SessionRecord) -> Path:
+    record.storage_state_path.parent.mkdir(parents=True, exist_ok=True)
+    record.storage_state_path.write_text(
+        json.dumps(storage_state_payload(record), indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    os.chmod(record.storage_state_path, 0o600)
+    return record.storage_state_path
+
+
 def session_path(path: Path | None = None) -> Path:
     return path or default_session_path()
 
@@ -119,7 +146,7 @@ def save_credentials(
     path: Path | None = None,
     storage_state_path_value: Path | None = None,
 ) -> SessionRecord:
-    return save_session(
+    record = save_session(
         build_session_record(
             sessionid=sessionid,
             sessionid_sign=sessionid_sign,
@@ -128,6 +155,8 @@ def save_credentials(
         ),
         path=path,
     )
+    write_storage_state(record)
+    return record
 
 
 def clear_session(path: Path | None = None) -> dict[str, bool]:
@@ -184,7 +213,14 @@ def validate_session(record: SessionRecord, timeout: float = 15.0) -> SessionSta
         ) from exc
     url = str(response.url).lower()
     body = response.text.lower()
-    if "signin" in url or "captcha" in body or "log in" in body:
+    if (
+        response.status_code in {401, 403}
+        or "signin" in url
+        or "captcha" in url
+        or "challenge" in url
+        or "cf-chl" in body
+        or "verify you are human" in body
+    ):
         raise SessionExpiredError(
             "Stored TradingView session is no longer valid.",
             hint=(

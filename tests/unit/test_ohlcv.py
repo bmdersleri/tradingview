@@ -48,4 +48,7 @@ def test_ohlcv_request_messages_include_auth_and_series() -> None:
     assert resolution_for_interval("1d") == "1D"
     assert len(messages) == 4
     assert "set_auth_token" in messages[0]
+    assert (
+        '={\\"adjustment\\":\\"splits\\",\\"symbol\\":\\"BIST:THYAO\\"}' in messages[2]
+    )
     assert "create_series" in messages[-1]

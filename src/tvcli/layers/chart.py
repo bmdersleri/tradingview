@@ -7,6 +7,7 @@ import time
 from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
+from shutil import which
 from typing import Any
 
 from ..auth.session import require_session
@@ -16,6 +17,7 @@ DEFAULT_CHROMIUM_ARGS = ("--disable-blink-features=AutomationControlled",)
 SELECTORS = {
     "chart_canvas": "canvas",
     "chart_root": "[data-name='pane-legend-source-item']",
+    "chart_error_text": "Something went wrong",
 }
 
 
@@ -49,15 +51,26 @@ def _load_playwright() -> Any:
     return sync_playwright
 
 
+def _launch_browser(playwright: Any, *, headless: bool, args: tuple[str, ...]) -> Any:
+    launch_kwargs: dict[str, Any] = {
+        "headless": headless,
+        "args": list(args),
+    }
+    if which("google-chrome") or which("google-chrome-stable"):
+        launch_kwargs["channel"] = "chrome"
+    return playwright.chromium.launch(**launch_kwargs)
+
+
 def create_browser_context(
     playwright: Any,
     *,
     storage_state_path: Path | None,
     config: BrowserSessionConfig,
 ) -> tuple[Any, Any]:
-    browser = playwright.chromium.launch(
+    browser = _launch_browser(
+        playwright,
         headless=config.headless,
-        args=list(config.chromium_args),
+        args=config.chromium_args,
     )
     context = browser.new_context(
         viewport={"width": config.width, "height": config.height},
@@ -77,13 +90,24 @@ def chart_url(symbol: str, interval: str, theme: str = "dark") -> str:
 def _looks_like_login_wall(page: Any) -> bool:
     try:
         url = str(getattr(page, "url", "")).lower()
-        if "signin" in url or "login" in url:
+        if (
+            "accounts/signin" in url
+            or "accounts/login" in url
+            or "captcha" in url
+            or "challenge" in url
+        ):
             return True
     except Exception:
         pass
     try:
-        content = str(page.content()).lower()
-        if "captcha" in content or "sign in" in content or "log in" in content:
+        content = str(page.locator("body").inner_text(timeout=1000)).lower()
+    except Exception:
+        try:
+            content = str(page.content()).lower()
+        except Exception:
+            content = ""
+    try:
+        if "captcha" in content or "verify you are human" in content:
             return True
     except Exception:
         pass
@@ -131,6 +155,18 @@ def _add_studies(page: Any, studies: tuple[str, ...]) -> None:
         page.keyboard.press("Alt+I")
 
 
+def _dismiss_chart_error_dialog(page: Any) -> bool:
+    try:
+        dialog = page.get_by_text(SELECTORS["chart_error_text"], exact=False)
+        if not dialog.count():
+            return False
+        page.keyboard.press("Escape")
+        page.wait_for_timeout(500)
+        return True
+    except Exception:
+        return False
+
+
 def shot_chart(request: ChartRequest, timeout_ms: int = 15_000) -> dict[str, Any]:
     record = require_session()
     sync_playwright = _load_playwright()
@@ -163,9 +199,10 @@ def shot_chart(request: ChartRequest, timeout_ms: int = 15_000) -> dict[str, Any
                     ),
                 )
             _add_studies(page, request.studies)
+            chart_error_dismissed = _dismiss_chart_error_dialog(page)
             wait_for_canvas_stability(page, timeout_ms=timeout_ms)
             locator = page.locator(SELECTORS["chart_canvas"])
-            if locator.count():
+            if locator.count() and not chart_error_dismissed:
                 locator.first.screenshot(path=str(request.out))
             else:
                 page.screenshot(path=str(request.out), full_page=True)

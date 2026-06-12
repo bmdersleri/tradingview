@@ -3,8 +3,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import anyio
 import httpx
-from fastapi.testclient import TestClient
 
 from tvcli.webhook.app import create_app
 
@@ -12,17 +12,26 @@ from tvcli.webhook.app import create_app
 def test_webhook_app_healthz_and_file_append(tmp_path: Path) -> None:
     alerts_path = tmp_path / "alerts.jsonl"
     app = create_app(secret="secret", sink="file", alerts_path=alerts_path)
-    with TestClient(app) as client:
-        health = client.get("/healthz")
-        rejected = client.post("/hook/wrong", json={"x": 1})
-        accepted = client.post(
-            "/hook/secret", json={"symbol": "BIST:THYAO", "price": 320}
-        )
-        raw = client.post(
-            "/hook/secret",
-            data="plain alert body",
-            headers={"content-type": "text/plain"},
-        )
+
+    async def run_requests() -> tuple[httpx.Response, ...]:
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app),
+            base_url="http://testserver",
+        ) as client:
+            return (
+                await client.get("/healthz"),
+                await client.post("/hook/wrong", json={"x": 1}),
+                await client.post(
+                    "/hook/secret", json={"symbol": "BIST:THYAO", "price": 320}
+                ),
+                await client.post(
+                    "/hook/secret",
+                    content="plain alert body",
+                    headers={"content-type": "text/plain"},
+                ),
+            )
+
+    health, rejected, accepted, raw = anyio.run(run_requests)
 
     assert health.status_code == 200
     assert health.json()["ok"] is True
@@ -58,11 +67,18 @@ def test_webhook_telegram_dispatch(tmp_path: Path) -> None:
         telegram_chat_id="12345",
         telegram_client=client,
     )
-    with TestClient(app) as test_client:
-        response = test_client.post(
-            "/hook/secret",
-            json={"symbol": "BIST:THYAO", "price": 320, "message": "crossing"},
-        )
+
+    async def send_alert() -> httpx.Response:
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app),
+            base_url="http://testserver",
+        ) as test_client:
+            return await test_client.post(
+                "/hook/secret",
+                json={"symbol": "BIST:THYAO", "price": 320, "message": "crossing"},
+            )
+
+    response = anyio.run(send_alert)
 
     assert response.status_code == 200
     assert alerts_path.exists()

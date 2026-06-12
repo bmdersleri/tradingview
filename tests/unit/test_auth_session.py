@@ -8,6 +8,7 @@ from tvcli.auth.session import (
     clear_session,
     cookie_jar,
     load_session,
+    save_credentials,
     save_session,
 )
 
@@ -49,3 +50,20 @@ def test_cookie_jar_includes_sign_cookie() -> None:
         "sessionid": "abc",
         "sessionid_sign": "def",
     }
+
+
+def test_save_credentials_writes_browser_storage_state(tmp_path: Path) -> None:
+    session_file = tmp_path / "session.json"
+    storage_state = tmp_path / "storage_state.json"
+
+    save_credentials(
+        sessionid="abc",
+        sessionid_sign="def",
+        path=session_file,
+        storage_state_path_value=storage_state,
+    )
+
+    assert session_file.exists()
+    assert storage_state.exists()
+    assert '"name": "sessionid"' in storage_state.read_text(encoding="utf-8")
+    assert '"name": "sessionid_sign"' in storage_state.read_text(encoding="utf-8")

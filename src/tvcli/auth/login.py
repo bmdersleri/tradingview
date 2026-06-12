@@ -10,6 +10,7 @@ from typing import Any
 
 from ..config import default_storage_state_path
 from ..errors import BrowserError, CaptchaDetectedError, SessionExpiredError
+from ..layers.chart import _launch_browser
 from .session import (
     SessionRecord,
     build_session_record,
@@ -87,9 +88,10 @@ def run_login(
     try:
         with sync_playwright() as playwright:
             browser = None
-            browser = playwright.chromium.launch(
+            browser = _launch_browser(
+                playwright,
                 headless=headless,
-                args=["--disable-blink-features=AutomationControlled"],
+                args=("--disable-blink-features=AutomationControlled",),
             )
             try:
                 context = browser.new_context(

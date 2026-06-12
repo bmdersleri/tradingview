@@ -5,7 +5,11 @@ from pathlib import Path
 from typer.testing import CliRunner
 
 from tvcli.cli import app
-from tvcli.layers.chart import chart_url, wait_for_canvas_stability
+from tvcli.layers.chart import (
+    _looks_like_login_wall,
+    chart_url,
+    wait_for_canvas_stability,
+)
 
 
 class FakeLocator:
@@ -43,6 +47,26 @@ def test_chart_url_and_canvas_stability() -> None:
     wait_for_canvas_stability(page, timeout_ms=2000, sample_ms=10)
 
     assert page.waits == 1
+
+
+def test_login_wall_detection_ignores_normal_chart_copy() -> None:
+    class Page:
+        url = "https://www.tradingview.com/chart/example/?symbol=BIST%3ATHYAO"
+
+        def content(self) -> str:
+            return "<html><body>Save Trade Publish Log in menu copy</body></html>"
+
+    assert _looks_like_login_wall(Page()) is False
+
+
+def test_login_wall_detection_flags_challenge_url() -> None:
+    class Page:
+        url = "https://www.tradingview.com/accounts/signin/"
+
+        def content(self) -> str:
+            return "<html></html>"
+
+    assert _looks_like_login_wall(Page()) is True
 
 
 def test_chart_shot_command_uses_layer(monkeypatch, tmp_path: Path) -> None:

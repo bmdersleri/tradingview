@@ -63,7 +63,7 @@ def create_app(
     )
 
     @app.get("/healthz")
-    def healthz() -> dict[str, Any]:
+    async def healthz() -> dict[str, Any]:
         state = cast(WebhookState, app.state.webhook)
         return {
             "ok": True,
