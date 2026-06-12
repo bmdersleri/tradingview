@@ -312,6 +312,23 @@ LOW_FREE_FLOAT_PCT = 20.0
 _LOW_FLOAT_CONFIDENCE_FACTOR = 0.7
 
 
+def low_float_note(free_float: float) -> str | None:
+    """The manipulation-risk note for a thin float, or None when liquid enough."""
+    if free_float >= LOW_FREE_FLOAT_PCT:
+        return None
+    return (
+        f"Low free-float ({free_float:.1f}%): thin liquidity, higher "
+        "manipulation risk — treat the signal with extra caution."
+    )
+
+
+def damp_confidence(confidence: float, free_float: float) -> float:
+    """Discount confidence for a thin float; leave it untouched otherwise."""
+    if free_float >= LOW_FREE_FLOAT_PCT:
+        return confidence
+    return round(confidence * _LOW_FLOAT_CONFIDENCE_FACTOR, 4)
+
+
 def apply_liquidity(report: SignalReport, free_float: float) -> SignalReport:
     """Attach a free-float read; damp confidence when the float is thin.
 
@@ -320,19 +337,11 @@ def apply_liquidity(report: SignalReport, free_float: float) -> SignalReport:
     """
     from dataclasses import replace
 
-    note: str | None = None
-    confidence = report.confidence
-    if free_float < LOW_FREE_FLOAT_PCT:
-        note = (
-            f"Low free-float ({free_float:.1f}%): thin liquidity, higher "
-            "manipulation risk — treat the signal with extra caution."
-        )
-        confidence = round(report.confidence * _LOW_FLOAT_CONFIDENCE_FACTOR, 4)
     return replace(
         report,
-        confidence=confidence,
+        confidence=damp_confidence(report.confidence, free_float),
         free_float=round(free_float, 2),
-        liquidity_note=note,
+        liquidity_note=low_float_note(free_float),
     )
 
 

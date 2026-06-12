@@ -23,27 +23,34 @@ def shot_query(request: chart.ChartRequest) -> dict[str, Any]:
     return chart.shot_chart(request)
 
 
+def _free_float_for(symbol: str) -> float | None:
+    """VAP free-float ratio for a BIST symbol, or None when out of VAP's scope.
+
+    For BIST symbols a VAP failure propagates (the user wants it to be a hard
+    component there); non-BIST symbols have no VAP coverage, so the lookup is
+    skipped entirely and free_float stays null.
+    """
+    if not freefloat.is_bist_symbol(symbol):
+        return None
+    record = freefloat.lookup(freefloat.normalize_code(symbol))
+    return record.ratio if record is not None else None
+
+
 def analyze_query(request: analyze.AnalyzeRequest) -> dict[str, Any]:
     payload = analyze.run_analysis(request)
     # When --auto produced a signal block, enrich it with VAP free-float the same
     # way `chart signal` does. signals.py / analyze.py stay network-free; the
-    # lookup lives here, at the command boundary.
+    # lookup lives here, at the command boundary, and the damping rules come from
+    # signals.py so both paths stay in lockstep.
     signal_block = payload.get("signal")
-    if isinstance(signal_block, dict) and freefloat.is_bist_symbol(request.symbol):
-        record = freefloat.lookup(freefloat.normalize_code(request.symbol))
-        if record is not None and record.ratio < signals.LOW_FREE_FLOAT_PCT:
+    if isinstance(signal_block, dict):
+        free_float = _free_float_for(request.symbol)
+        if free_float is not None:
             liquidity = signal_block.setdefault("liquidity", {})
-            liquidity["free_float"] = round(record.ratio, 2)
-            liquidity["note"] = (
-                f"Low free-float ({record.ratio:.1f}%): thin liquidity, higher "
-                "manipulation risk — treat the signal with extra caution."
-            )
-            signal_block["confidence"] = round(
-                float(signal_block["confidence"]) * 0.7, 4
-            )
-        elif record is not None:
-            signal_block.setdefault("liquidity", {})["free_float"] = round(
-                record.ratio, 2
+            liquidity["free_float"] = round(free_float, 2)
+            liquidity["note"] = signals.low_float_note(free_float)
+            signal_block["confidence"] = signals.damp_confidence(
+                float(signal_block["confidence"]), free_float
             )
     return payload
 
@@ -55,23 +62,6 @@ class SignalRequest:
     bars: int
 
 
-def _enrich_with_free_float(
-    report: signals.SignalReport, symbol: str
-) -> signals.SignalReport:
-    """Attach VAP free-float to a signal for BIST symbols.
-
-    For BIST symbols a VAP failure is surfaced (the user asked for it to be a
-    hard component there); for non-BIST symbols VAP has no coverage, so we skip
-    the lookup entirely and leave free_float null.
-    """
-    if not freefloat.is_bist_symbol(symbol):
-        return report
-    record = freefloat.lookup(freefloat.normalize_code(symbol))
-    if record is None:
-        return report
-    return signals.apply_liquidity(report, record.ratio)
-
-
 def signal_query(request: SignalRequest) -> dict[str, Any]:
     bars = ohlcv.fetch_history(
         ohlcv.OhlcvRequest(
@@ -79,7 +69,10 @@ def signal_query(request: SignalRequest) -> dict[str, Any]:
         )
     )
     closes = [bar.close for bar in bars]
-    report = _enrich_with_free_float(signals.analyze_signal(closes), request.symbol)
+    report = signals.analyze_signal(closes)
+    free_float = _free_float_for(request.symbol)
+    if free_float is not None:
+        report = signals.apply_liquidity(report, free_float)
     payload = signals.signal_payload(report)
     payload.update(
         {"symbol": request.symbol, "interval": request.interval, "bars": len(bars)}
