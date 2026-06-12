@@ -262,6 +262,7 @@ and all others the library supports.
 | `data fields --market turkey [--search rsi]` | List/search available scanner fields with types. |
 | `data search QUERY [--market M]` | Symbol search/resolution. Returns candidates with exchange, type, description. |
 | `data quote SYMBOL...` | Snapshot quote(s): price, change, volume, market cap via scanner single-symbol query. |
+| `data float [SYMBOL] [--all] [--date DD/MM/YYYY]` | BIST free-float ("fiili dolaşım") ratios from VAP / MKK. `data float THYAO` returns one company; `data float --all` returns the whole daily table. The full daily report is fetched once via a two-step form POST (returns an .xlsx), parsed with the stdlib, cached for 24 h, and throttled (5 reports / 10 min) to respect VAP limits. JSON (single): `{"code": "THYAO", "isin": "...", "name": "...", "ratio": 50.43, "float_shares": 696026808, "capital": 1380000000, "date": "11.06.2026", "source": "VAP / MKK"}`. Official public data; personal/research use, free-float is a static liquidity metric, not a signal. |
 
 **Filter DSL for `--where`:** semicolon-separated clauses, each
 `field OP value` with OP ∈ `> >= < <= == != in between`. Examples:
@@ -361,7 +362,7 @@ JSON output (`analyze`): `{"symbol": "...", "interval": "...", "bars": 399, "sty
 
 | `chart signal SYMBOL --interval 1d [--bars 500]` | Detect the market regime (trending/ranging/volatile) from OHLCV history, let four indicators (MA-cross, MACD, RSI, Bollinger) vote, weight the votes by regime fit, and emit a buy/sell/hold signal with confidence and per-indicator reasons. No chart, no browser — JSON report only. |
 
-JSON output (`signal`): `{"symbol": "...", "interval": "...", "bars": 250, "signal": "buy", "confidence": 0.62, "score": 0.41, "regime": {"kind": "trending_up", "strength": 0.8, "volatility": 0.011, "metrics": {...}}, "votes": [{"indicator": "ma_cross", "vote": 1, "strength": 0.7, "reason": "SMA-50 above SMA-200 (recent golden cross)."}, ...], "selected_indicators": ["sma:50", "sma:200", "macd:12:26:9"], "disclaimer": "..."}`. Decision-support only, not financial advice: indicators are lagging and regime detection cannot predict the future.
+JSON output (`signal`): `{"symbol": "...", "interval": "...", "bars": 250, "signal": "buy", "confidence": 0.62, "score": 0.41, "regime": {"kind": "trending_up", "strength": 0.8, "volatility": 0.011, "metrics": {...}}, "votes": [{"indicator": "ma_cross", "vote": 1, "strength": 0.7, "reason": "SMA-50 above SMA-200 (recent golden cross)."}, ...], "selected_indicators": ["sma:50", "sma:200", "macd:12:26:9"], "liquidity": {"free_float": 50.43, "note": null}, "disclaimer": "..."}`. For BIST symbols the `liquidity` block is enriched from VAP free-float (`data float`): a free-float below 20% adds a manipulation-risk note and damps confidence (×0.7). Non-BIST symbols leave `free_float` null. Decision-support only, not financial advice: indicators are lagging and regime detection cannot predict the future.
 
 Indicator spec syntax: `NAME[:p1[:p2[:p3]]]` — `sma:50`, `ema:20`, `wma:200`, `bbands:20:2`, `rsi:14`, `macd:12:26:9`. An unknown name or bad parameter exits 2 with the offending spec in the hint. `chart shot --studies` is not supported (exit 2) — use `chart analyze` for overlays.
 

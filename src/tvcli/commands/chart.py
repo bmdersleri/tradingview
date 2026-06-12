@@ -8,7 +8,7 @@ from typing import Annotated, Any
 
 import typer
 
-from ..layers import analyze, chart, ohlcv, signals
+from ..layers import analyze, chart, freefloat, ohlcv, signals
 from ._helpers import (
     resolve_json_mode,
     resolve_retry_policy,
@@ -24,7 +24,28 @@ def shot_query(request: chart.ChartRequest) -> dict[str, Any]:
 
 
 def analyze_query(request: analyze.AnalyzeRequest) -> dict[str, Any]:
-    return analyze.run_analysis(request)
+    payload = analyze.run_analysis(request)
+    # When --auto produced a signal block, enrich it with VAP free-float the same
+    # way `chart signal` does. signals.py / analyze.py stay network-free; the
+    # lookup lives here, at the command boundary.
+    signal_block = payload.get("signal")
+    if isinstance(signal_block, dict) and freefloat.is_bist_symbol(request.symbol):
+        record = freefloat.lookup(freefloat.normalize_code(request.symbol))
+        if record is not None and record.ratio < signals.LOW_FREE_FLOAT_PCT:
+            liquidity = signal_block.setdefault("liquidity", {})
+            liquidity["free_float"] = round(record.ratio, 2)
+            liquidity["note"] = (
+                f"Low free-float ({record.ratio:.1f}%): thin liquidity, higher "
+                "manipulation risk — treat the signal with extra caution."
+            )
+            signal_block["confidence"] = round(
+                float(signal_block["confidence"]) * 0.7, 4
+            )
+        elif record is not None:
+            signal_block.setdefault("liquidity", {})["free_float"] = round(
+                record.ratio, 2
+            )
+    return payload
 
 
 @dataclass(frozen=True, slots=True)
@@ -34,6 +55,23 @@ class SignalRequest:
     bars: int
 
 
+def _enrich_with_free_float(
+    report: signals.SignalReport, symbol: str
+) -> signals.SignalReport:
+    """Attach VAP free-float to a signal for BIST symbols.
+
+    For BIST symbols a VAP failure is surfaced (the user asked for it to be a
+    hard component there); for non-BIST symbols VAP has no coverage, so we skip
+    the lookup entirely and leave free_float null.
+    """
+    if not freefloat.is_bist_symbol(symbol):
+        return report
+    record = freefloat.lookup(freefloat.normalize_code(symbol))
+    if record is None:
+        return report
+    return signals.apply_liquidity(report, record.ratio)
+
+
 def signal_query(request: SignalRequest) -> dict[str, Any]:
     bars = ohlcv.fetch_history(
         ohlcv.OhlcvRequest(
@@ -41,7 +79,7 @@ def signal_query(request: SignalRequest) -> dict[str, Any]:
         )
     )
     closes = [bar.close for bar in bars]
-    report = signals.analyze_signal(closes)
+    report = _enrich_with_free_float(signals.analyze_signal(closes), request.symbol)
     payload = signals.signal_payload(report)
     payload.update(
         {"symbol": request.symbol, "interval": request.interval, "bars": len(bars)}

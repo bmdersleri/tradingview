@@ -204,6 +204,75 @@ def test_chart_analyze_auto_attaches_signal(monkeypatch, tmp_path: Path) -> None
     assert '"signal"' in result.output
 
 
+def test_signal_query_enriches_bist_with_free_float(monkeypatch) -> None:
+    from tvcli.commands import chart as chart_cmd
+    from tvcli.layers import freefloat, ohlcv
+
+    bars = tuple(
+        ohlcv.OhlcvBar(
+            time=1_700_000_000 + i * 86_400,
+            open=100.0 + i,
+            high=101.0 + i,
+            low=99.0 + i,
+            close=100.0 + i,
+            volume=1000.0,
+        )
+        for i in range(260)
+    )
+    monkeypatch.setattr(
+        "tvcli.commands.chart.ohlcv.fetch_history", lambda request: bars
+    )
+    # Thin float => liquidity note + confidence damp.
+    monkeypatch.setattr(
+        "tvcli.commands.chart.freefloat.lookup",
+        lambda code: freefloat.FloatRecord(
+            code="THYAO",
+            isin="X",
+            name="T",
+            float_shares=1.0,
+            capital=10.0,
+            ratio=10.0,
+            date="11.06.2026",
+        ),
+    )
+
+    payload = chart_cmd.signal_query(
+        chart_cmd.SignalRequest(symbol="BIST:THYAO", interval="1d", bars=260)
+    )
+    assert payload["liquidity"]["free_float"] == 10.0
+    assert "manipulation" in payload["liquidity"]["note"].lower()
+
+
+def test_signal_query_skips_free_float_for_non_bist(monkeypatch) -> None:
+    from tvcli.commands import chart as chart_cmd
+    from tvcli.layers import ohlcv
+
+    bars = tuple(
+        ohlcv.OhlcvBar(
+            time=1_700_000_000 + i * 86_400,
+            open=100.0 + i,
+            high=101.0 + i,
+            low=99.0 + i,
+            close=100.0 + i,
+            volume=1000.0,
+        )
+        for i in range(260)
+    )
+    monkeypatch.setattr(
+        "tvcli.commands.chart.ohlcv.fetch_history", lambda request: bars
+    )
+
+    def boom(_code: str) -> object:
+        raise AssertionError("free-float lookup must not run for non-BIST symbols")
+
+    monkeypatch.setattr("tvcli.commands.chart.freefloat.lookup", boom)
+
+    payload = chart_cmd.signal_query(
+        chart_cmd.SignalRequest(symbol="NASDAQ:AAPL", interval="1d", bars=260)
+    )
+    assert payload["liquidity"]["free_float"] is None
+
+
 def test_chart_shot_rejects_studies(monkeypatch, tmp_path: Path) -> None:
     # --studies is not supported on `shot`; it must fail fast (exit 2) before any
     # browser work and point the user at `chart analyze`.

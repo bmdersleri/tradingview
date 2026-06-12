@@ -108,6 +108,31 @@ def test_signal_payload_shape() -> None:
     assert isinstance(payload["selected_indicators"], list)
 
 
+def test_apply_liquidity_low_float_damps_confidence() -> None:
+    base = s.analyze_signal(_uptrend())
+    enriched = s.apply_liquidity(base, 12.5)
+    assert enriched.free_float == 12.5
+    assert enriched.liquidity_note is not None
+    assert "manipulation" in enriched.liquidity_note.lower()
+    # Confidence is reduced (×0.7) but direction is unchanged.
+    assert enriched.confidence < base.confidence
+    assert enriched.signal == base.signal
+
+
+def test_apply_liquidity_high_float_keeps_confidence() -> None:
+    base = s.analyze_signal(_uptrend())
+    enriched = s.apply_liquidity(base, 55.0)
+    assert enriched.free_float == 55.0
+    assert enriched.liquidity_note is None
+    assert enriched.confidence == base.confidence
+
+
+def test_signal_payload_has_liquidity_block() -> None:
+    payload = s.signal_payload(s.analyze_signal(_uptrend()))
+    assert "liquidity" in payload
+    assert payload["liquidity"] == {"free_float": None, "note": None}
+
+
 def test_votes_handle_short_series_without_crashing() -> None:
     # Fewer bars than the slow MA period: must degrade, not raise.
     report = s.analyze_signal([100.0, 101.0, 102.0, 101.5, 103.0])

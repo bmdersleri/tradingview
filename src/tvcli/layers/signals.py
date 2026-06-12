@@ -302,6 +302,38 @@ class SignalReport:
     confidence: float  # 0..1
     votes: list[IndicatorVote]
     selected_indicators: tuple[str, ...]
+    free_float: float | None = None  # free-float ratio (%), if known
+    liquidity_note: str | None = None  # liquidity/manipulation-risk warning
+
+
+# Below this free-float percentage a stock is thin and easier to push around, so
+# we keep the signal direction but discount the confidence in it.
+LOW_FREE_FLOAT_PCT = 20.0
+_LOW_FLOAT_CONFIDENCE_FACTOR = 0.7
+
+
+def apply_liquidity(report: SignalReport, free_float: float) -> SignalReport:
+    """Attach a free-float read; damp confidence when the float is thin.
+
+    Free-float is a static liquidity metric, not a directional signal — it never
+    flips buy/sell/hold, it only tempers how much to trust a thin-stock call.
+    """
+    from dataclasses import replace
+
+    note: str | None = None
+    confidence = report.confidence
+    if free_float < LOW_FREE_FLOAT_PCT:
+        note = (
+            f"Low free-float ({free_float:.1f}%): thin liquidity, higher "
+            "manipulation risk — treat the signal with extra caution."
+        )
+        confidence = round(report.confidence * _LOW_FLOAT_CONFIDENCE_FACTOR, 4)
+    return replace(
+        report,
+        confidence=confidence,
+        free_float=round(free_float, 2),
+        liquidity_note=note,
+    )
 
 
 def analyze_signal(closes: ind.FloatSeq) -> SignalReport:
@@ -357,5 +389,9 @@ def signal_payload(report: SignalReport) -> dict[str, object]:
             for v in report.votes
         ],
         "selected_indicators": list(report.selected_indicators),
+        "liquidity": {
+            "free_float": report.free_float,
+            "note": report.liquidity_note,
+        },
         "disclaimer": DISCLAIMER,
     }
