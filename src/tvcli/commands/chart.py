@@ -2,13 +2,16 @@
 
 from __future__ import annotations
 
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Annotated, Any
 
 import typer
 
+from ..errors import TvcliError
 from ..layers import analyze, chart, freefloat, ohlcv, signals
+from ..output import build_envelope, emit, envelope_from_error, render_table
 from ._helpers import (
     resolve_json_mode,
     resolve_retry_policy,
@@ -167,6 +170,45 @@ def analyze_command(
     run_command("chart.analyze", json_mode=json_mode, handler=handler)
 
 
+def _write_signal_human(payload: dict[str, Any]) -> None:
+    """Flatten the signal payload into readable tables (summary + votes).
+
+    The generic key/value renderer would dump the nested ``regime``/``liquidity``
+    dicts as raw ``str(dict)`` lines, so signal gets its own layout here while
+    ``--json`` keeps the full structured envelope.
+    """
+    regime = payload.get("regime") or {}
+    liquidity = payload.get("liquidity") or {}
+    free_float = liquidity.get("free_float")
+    summary: dict[str, Any] = {
+        "symbol": payload.get("symbol"),
+        "interval": payload.get("interval"),
+        "bars": payload.get("bars"),
+        "signal": str(payload.get("signal", "")).upper(),
+        "confidence": payload.get("confidence"),
+        "score": payload.get("score"),
+        "regime": regime.get("kind"),
+        "regime_strength": regime.get("strength"),
+        "free_float_%": "—" if free_float is None else free_float,
+        "liquidity_note": liquidity.get("note") or "—",
+    }
+    sys.stdout.write(render_table(summary))
+    votes = payload.get("votes") or []
+    if votes:
+        rows = [
+            {
+                "indicator": v.get("indicator"),
+                "vote": {1: "buy", -1: "sell", 0: "hold"}.get(
+                    v.get("vote"), v.get("vote")
+                ),
+                "strength": v.get("strength"),
+                "reason": v.get("reason"),
+            }
+            for v in votes
+        ]
+        sys.stdout.write(render_table(rows))
+
+
 @app.command("signal")
 def signal_command(
     ctx: typer.Context,
@@ -186,4 +228,13 @@ def signal_command(
             backoff_seconds=backoff_seconds,
         )
 
-    run_command("chart.signal", json_mode=json_mode, handler=handler)
+    try:
+        result = handler()
+    except TvcliError as error:
+        emit(envelope_from_error("chart.signal", error), json_mode=json_mode)
+        raise typer.Exit(code=error.exit_code) from error
+
+    if json_mode:
+        emit(build_envelope(command="chart.signal", data=result), json_mode=True)
+        return
+    _write_signal_human(result)

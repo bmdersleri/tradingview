@@ -174,6 +174,37 @@ def test_chart_signal_command(monkeypatch) -> None:
     assert '"kind": "trending_up"' in result.output
 
 
+def test_chart_signal_human_shows_liquidity(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "tvcli.commands.chart.signal_query",
+        lambda request: {
+            "symbol": request.symbol,
+            "interval": request.interval,
+            "bars": 250,
+            "signal": "buy",
+            "confidence": 0.1,
+            "score": 0.3,
+            "regime": {"kind": "ranging", "strength": 0.2, "volatility": 0.01},
+            "votes": [
+                {"indicator": "rsi", "vote": 1, "strength": 0.5, "reason": "oversold"}
+            ],
+            "selected_indicators": ["rsi:14"],
+            "liquidity": {"free_float": 0.12, "note": "Low free-float (0.1%): risk."},
+        },
+    )
+
+    runner = CliRunner()
+    # No --json: human-readable tables.
+    result = runner.invoke(app, ["chart", "signal", "BIST:ENPRA", "--bars", "250"])
+
+    assert result.exit_code == 0
+    assert "free_float" in result.output
+    assert "0.12" in result.output
+    assert "Low free-float" in result.output
+    # Votes table renders the per-indicator reason too.
+    assert "oversold" in result.output
+
+
 def test_chart_analyze_auto_attaches_signal(monkeypatch, tmp_path: Path) -> None:
     out = tmp_path / "auto.png"
 
