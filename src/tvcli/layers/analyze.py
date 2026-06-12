@@ -14,7 +14,7 @@ from typing import Any
 
 from ..errors import TvcliError, UsageError
 from . import indicators as ind
-from . import ohlcv
+from . import ohlcv, signals
 
 _THEME_BG = {"dark": "#131722", "light": "#ffffff"}
 _THEME_FG = {"dark": "#d1d4dc", "light": "#131722"}
@@ -38,6 +38,7 @@ class AnalyzeRequest:
     theme: str = "dark"
     style: str = "candle"
     volume: bool = True
+    auto: bool = False
 
 
 def _load_pyplot() -> Any:
@@ -214,19 +215,28 @@ def run_analysis(request: AnalyzeRequest) -> dict[str, Any]:
             f"Unknown chart style '{request.style}'.",
             hint=f"Use one of: {', '.join(_VALID_STYLES)}.",
         )
-    specs = [ind.parse_spec(raw) for raw in request.indicators]
+    bars = list(fetch_bars_query(request))
+    closes = [bar.close for bar in bars]
+    times = [datetime.fromtimestamp(bar.time, tz=UTC) for bar in bars]
+
+    signal_block: dict[str, Any] | None = None
+    raw_specs = list(request.indicators)
+    if request.auto:
+        report = signals.analyze_signal(closes)
+        signal_block = signals.signal_payload(report)
+        # Only auto-fill indicators the user did not pin explicitly.
+        if not raw_specs:
+            raw_specs = list(report.selected_indicators)
+
+    specs = [ind.parse_spec(raw) for raw in raw_specs]
     if not specs:
         # Default to a single 200-period weighted moving average.
         specs = [ind.parse_spec("wma:200")]
 
-    bars = list(fetch_bars_query(request))
-    closes = [bar.close for bar in bars]
-    times = [datetime.fromtimestamp(bar.time, tz=UTC) for bar in bars]
     computed = [ind.compute(spec, closes) for spec in specs]
-
     render_analysis_png(bars, times, computed, request)
 
-    return {
+    payload: dict[str, Any] = {
         "symbol": request.symbol,
         "interval": request.interval,
         "bars": len(bars),
@@ -244,3 +254,6 @@ def run_analysis(request: AnalyzeRequest) -> dict[str, Any]:
         "path": str(request.out.resolve()),
         "bytes": request.out.stat().st_size,
     }
+    if signal_block is not None:
+        payload["signal"] = signal_block
+    return payload

@@ -147,6 +147,63 @@ def test_chart_analyze_command_uses_layer(monkeypatch, tmp_path: Path) -> None:
     assert '"volume": false' in result.output
 
 
+def test_chart_signal_command(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "tvcli.commands.chart.signal_query",
+        lambda request: {
+            "symbol": request.symbol,
+            "interval": request.interval,
+            "bars": 250,
+            "signal": "buy",
+            "confidence": 0.62,
+            "score": 0.4,
+            "regime": {"kind": "trending_up", "strength": 0.8, "volatility": 0.01},
+            "votes": [],
+            "selected_indicators": ["sma:50", "sma:200"],
+        },
+    )
+
+    runner = CliRunner()
+    result = runner.invoke(
+        app, ["chart", "signal", "BIST:THYAO", "--bars", "250", "--json"]
+    )
+
+    assert result.exit_code == 0
+    assert '"command": "chart.signal"' in result.output
+    assert '"signal": "buy"' in result.output
+    assert '"kind": "trending_up"' in result.output
+
+
+def test_chart_analyze_auto_attaches_signal(monkeypatch, tmp_path: Path) -> None:
+    out = tmp_path / "auto.png"
+
+    def fake_analyze(request: object) -> dict[str, object]:
+        assert request.auto is True
+        return {
+            "symbol": "BIST:THYAO",
+            "interval": "1d",
+            "bars": 250,
+            "style": "candle",
+            "volume": True,
+            "indicators": [],
+            "path": str(out),
+            "bytes": 100,
+            "signal": {"signal": "hold", "confidence": 0.1},
+        }
+
+    monkeypatch.setattr("tvcli.commands.chart.analyze_query", fake_analyze)
+
+    runner = CliRunner()
+    result = runner.invoke(
+        app,
+        ["chart", "analyze", "BIST:THYAO", "--auto", "--out", str(out), "--json"],
+    )
+
+    assert result.exit_code == 0
+    assert '"command": "chart.analyze"' in result.output
+    assert '"signal"' in result.output
+
+
 def test_chart_shot_rejects_studies(monkeypatch, tmp_path: Path) -> None:
     # --studies is not supported on `shot`; it must fail fast (exit 2) before any
     # browser work and point the user at `chart analyze`.

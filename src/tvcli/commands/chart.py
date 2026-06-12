@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Annotated, Any
 
 import typer
 
-from ..layers import analyze, chart
+from ..layers import analyze, chart, ohlcv, signals
 from ._helpers import (
     resolve_json_mode,
     resolve_retry_policy,
@@ -24,6 +25,28 @@ def shot_query(request: chart.ChartRequest) -> dict[str, Any]:
 
 def analyze_query(request: analyze.AnalyzeRequest) -> dict[str, Any]:
     return analyze.run_analysis(request)
+
+
+@dataclass(frozen=True, slots=True)
+class SignalRequest:
+    symbol: str
+    interval: str
+    bars: int
+
+
+def signal_query(request: SignalRequest) -> dict[str, Any]:
+    bars = ohlcv.fetch_history(
+        ohlcv.OhlcvRequest(
+            symbol=request.symbol, interval=request.interval, bars=request.bars
+        )
+    )
+    closes = [bar.close for bar in bars]
+    report = signals.analyze_signal(closes)
+    payload = signals.signal_payload(report)
+    payload.update(
+        {"symbol": request.symbol, "interval": request.interval, "bars": len(bars)}
+    )
+    return payload
 
 
 @app.command("shot")
@@ -74,6 +97,14 @@ def analyze_command(
     bars: Annotated[int, typer.Option("--bars")] = 500,
     style: Annotated[str, typer.Option("--style", help="candle or line")] = "candle",
     volume: Annotated[bool, typer.Option("--volume/--no-volume")] = True,
+    auto: Annotated[
+        bool,
+        typer.Option(
+            "--auto",
+            help="Detect the market regime and auto-select fitting indicators; "
+            "attach a buy/sell/hold signal to the output.",
+        ),
+    ] = False,
     theme: Annotated[str, typer.Option("--theme")] = "dark",
     width: Annotated[int, typer.Option("--width")] = 1600,
     height: Annotated[int, typer.Option("--height")] = 900,
@@ -91,6 +122,7 @@ def analyze_command(
         theme=theme,
         style=style,
         volume=volume,
+        auto=auto,
     )
 
     def handler() -> dict[str, Any]:
@@ -102,3 +134,25 @@ def analyze_command(
         )
 
     run_command("chart.analyze", json_mode=json_mode, handler=handler)
+
+
+@app.command("signal")
+def signal_command(
+    ctx: typer.Context,
+    symbol: Annotated[str, typer.Argument()],
+    interval: Annotated[str, typer.Option("--interval")] = "1d",
+    bars: Annotated[int, typer.Option("--bars")] = 500,
+    json_mode: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    json_mode = resolve_json_mode(ctx, json_mode)
+    request = SignalRequest(symbol=symbol, interval=interval, bars=bars)
+
+    def handler() -> dict[str, Any]:
+        retries, backoff_seconds = resolve_retry_policy(ctx)
+        return run_with_retries(
+            lambda: signal_query(request),
+            retries=retries,
+            backoff_seconds=backoff_seconds,
+        )
+
+    run_command("chart.signal", json_mode=json_mode, handler=handler)

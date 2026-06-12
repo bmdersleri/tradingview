@@ -101,6 +101,35 @@ def test_run_analysis_rejects_bad_style(monkeypatch, tmp_path: Path) -> None:
         )
 
 
+def test_run_analysis_auto_attaches_signal(monkeypatch, tmp_path: Path) -> None:
+    out = tmp_path / "auto.png"
+    # A clean uptrend so the regime resolves and indicators are auto-selected.
+    bars = tuple(
+        ohlcv.OhlcvBar(
+            time=1_700_000_000 + i * 86_400,
+            open=100.0 + i,
+            high=101.0 + i,
+            low=99.0 + i,
+            close=100.0 + i,
+            volume=1000.0,
+        )
+        for i in range(260)
+    )
+    monkeypatch.setattr("tvcli.layers.analyze.fetch_bars_query", lambda request: bars)
+
+    payload = analyze.run_analysis(
+        analyze.AnalyzeRequest(symbol="X:Y", interval="1d", out=out, auto=True)
+    )
+
+    assert "signal" in payload
+    assert payload["signal"]["signal"] in {"buy", "sell", "hold"}
+    assert payload["signal"]["regime"]["kind"].startswith("trend")
+    # Auto-selected indicators were rendered (not the wma:200 default).
+    rendered = {i["spec"] for i in payload["indicators"]}
+    assert "sma:50" in rendered or "sma:200" in rendered
+    assert out.exists()
+
+
 def test_run_analysis_defaults_to_wma200(monkeypatch, tmp_path: Path) -> None:
     out = tmp_path / "default.png"
     monkeypatch.setattr(

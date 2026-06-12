@@ -357,7 +357,11 @@ the `unauthorized_user_token` but must degrade gracefully.
 
 JSON output (`shot`): `{"path": "/abs/path/chart.png", "symbol": "...", "interval": "...", "bytes": 182345, "anonymous_fallback": false}`.
 
-JSON output (`analyze`): `{"symbol": "...", "interval": "...", "bars": 399, "style": "candle", "volume": true, "indicators": [{"spec": "wma:200", "kind": "wma", "period": 200, "last": 299.37}], "path": "/abs/path/chart.png", "bytes": 115665}`.
+JSON output (`analyze`): `{"symbol": "...", "interval": "...", "bars": 399, "style": "candle", "volume": true, "indicators": [{"spec": "wma:200", "kind": "wma", "period": 200, "last": 299.37}], "path": "/abs/path/chart.png", "bytes": 115665}`. With `--auto`, a `signal` block (same shape as `chart signal`) is appended and indicators are auto-selected from the detected regime when none are passed.
+
+| `chart signal SYMBOL --interval 1d [--bars 500]` | Detect the market regime (trending/ranging/volatile) from OHLCV history, let four indicators (MA-cross, MACD, RSI, Bollinger) vote, weight the votes by regime fit, and emit a buy/sell/hold signal with confidence and per-indicator reasons. No chart, no browser — JSON report only. |
+
+JSON output (`signal`): `{"symbol": "...", "interval": "...", "bars": 250, "signal": "buy", "confidence": 0.62, "score": 0.41, "regime": {"kind": "trending_up", "strength": 0.8, "volatility": 0.011, "metrics": {...}}, "votes": [{"indicator": "ma_cross", "vote": 1, "strength": 0.7, "reason": "SMA-50 above SMA-200 (recent golden cross)."}, ...], "selected_indicators": ["sma:50", "sma:200", "macd:12:26:9"], "disclaimer": "..."}`. Decision-support only, not financial advice: indicators are lagging and regime detection cannot predict the future.
 
 Indicator spec syntax: `NAME[:p1[:p2[:p3]]]` — `sma:50`, `ema:20`, `wma:200`, `bbands:20:2`, `rsi:14`, `macd:12:26:9`. An unknown name or bad parameter exits 2 with the offending spec in the hint. `chart shot --studies` is not supported (exit 2) — use `chart analyze` for overlays.
 
