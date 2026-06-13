@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import io
 import re
+import time
 import xml.etree.ElementTree as ET
 import zipfile
 from contextlib import suppress
@@ -181,30 +182,36 @@ def _parse_xlsx(content: bytes) -> tuple[FloatRecord, ...]:
 
 
 def _download_report(report_date: date) -> tuple[FloatRecord, ...]:
-    try:
-        with httpx.Client(
-            follow_redirects=True,
-            timeout=30.0,
-            headers={"User-Agent": _USER_AGENT},
-        ) as client:
-            form = client.get(_VAP_URL)
-            form.raise_for_status()
-            match = re.search(r'name="as_fid"\s+value="([^"]+)"', form.text)
-            if match is None:
-                raise UpstreamChangedError(
-                    "VAP form token (as_fid) was not found.",
-                    hint="The VAP form layout may have changed.",
+    max_retries = 3
+    backoff = 2.0
+    for attempt in range(max_retries + 1):
+        try:
+            with httpx.Client(
+                follow_redirects=True,
+                timeout=30.0,
+                headers={"User-Agent": _USER_AGENT},
+            ) as client:
+                form = client.get(_VAP_URL)
+                form.raise_for_status()
+                match = re.search(r'name="as_fid"\s+value="([^"]+)"', form.text)
+                if match is None:
+                    raise UpstreamChangedError(
+                        "VAP form token (as_fid) was not found.",
+                        hint="The VAP form layout may have changed.",
+                    )
+                response = client.post(
+                    _VAP_URL,
+                    data={"date": _format_date(report_date), "as_fid": match.group(1)},
                 )
-            response = client.post(
-                _VAP_URL,
-                data={"date": _format_date(report_date), "as_fid": match.group(1)},
-            )
-            response.raise_for_status()
-    except httpx.HTTPError as exc:
-        raise NetworkError(
-            "Unable to fetch the VAP free-float report.",
-            hint="Check connectivity and retry.",
-        ) from exc
+                response.raise_for_status()
+                break
+        except httpx.HTTPError as exc:
+            if attempt >= max_retries:
+                raise NetworkError(
+                    "Unable to fetch the VAP free-float report.",
+                    hint="Check connectivity and retry.",
+                ) from exc
+            time.sleep(backoff * (2**attempt))
     # VAP serves an HTML page (not an .xlsx) for dates with no published report
     # yet — today's balances are released the next business day. Treat that as
     # "no data for this date", distinct from a genuine format change.

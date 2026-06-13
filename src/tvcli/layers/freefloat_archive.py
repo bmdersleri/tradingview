@@ -19,8 +19,11 @@ from typing import Any
 from ..cache import SQLiteTTLCache
 from ..config import default_archive_path, default_cache_path
 from ..errors import NotFoundError, RateLimitedError, UsageError
+from ..logging_utils import setup_logger
 from ..ratelimit import SQLiteTokenBucket
 from . import freefloat
+
+logger = setup_logger("tvcli.archive")
 
 _SOURCE = "VAP / MKK"
 _LOW_FLOAT_RISK = 20.0
@@ -1251,12 +1254,24 @@ def sync_archive(
     skipped = 0
     missing = 0
 
+    logger.info(
+        "Starting sync archive operation", extra={"latest": latest, "resume": resume}
+    )
+
     if latest:
         claim = store.claim_sync_slot(_SYNC_SOURCE_VAP)
         try:
+            logger.info("Fetching latest VAP free-float report")
             records = freefloat.fetch_report(None)
             result = store.sync_records(records)
+            logger.info(
+                "Successfully synced latest VAP free-float report",
+                extra={"date": result["report_date"], "records": len(records)},
+            )
         except NotFoundError as error:
+            logger.warning(
+                "No latest VAP free-float report found", extra={"error": error.message}
+            )
             store.complete_sync_slot(
                 _SYNC_SOURCE_VAP,
                 status="not_found",
@@ -1265,6 +1280,7 @@ def sync_archive(
             raise
         except Exception as error:
             message = getattr(error, "message", str(error))
+            logger.error("Failed to sync latest VAP free-float report", exc_info=True)
             store.complete_sync_slot(
                 _SYNC_SOURCE_VAP,
                 status="error",
@@ -1326,22 +1342,35 @@ def sync_archive(
                 _sleep(rate_seconds)
             attempted = True
             try:
+                logger.info(
+                    "Fetching free-float report for date",
+                    extra={"date": candidate.isoformat()},
+                )
                 records = freefloat.fetch_report(
                     candidate, cache=cache, throttle=backfill_throttle
                 )
             except NotFoundError:
                 # Weekend/holiday: stamp it so a future --resume run skips it
                 # instead of re-downloading the same empty day.
+                logger.info(
+                    "No report found for date (holiday/weekend)",
+                    extra={"date": candidate.isoformat()},
+                )
                 store.mark_empty(candidate)
                 missing += 1
                 fetched_in_session += 1
                 continue
             result = store.sync_records(records)
+            logger.info(
+                "Successfully synced report for date",
+                extra={"date": candidate.isoformat(), "records": len(records)},
+            )
             synced.append(result)
             last_report_date = result["report_date"]
             fetched_in_session += 1
     except Exception as error:
         message = getattr(error, "message", str(error))
+        logger.error("Backfill sync failed", exc_info=True)
         store.complete_sync_slot(_SYNC_SOURCE_VAP, status="error", error=message)
         raise
 

@@ -10,18 +10,39 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from fastapi import BackgroundTasks, FastAPI, HTTPException, status
+from fastapi import BackgroundTasks, FastAPI, HTTPException, Request, Response, status
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import FileResponse, HTMLResponse
 
 from ..layers import freefloat_archive
 from ..layers.float_dashboard import DashboardRequest, run_dashboard
+from ..logging_utils import setup_logger
+
+logger = setup_logger("tvcli.floatdash")
 
 
 def create_app(store: freefloat_archive.ArchiveStore | None = None) -> FastAPI:
     app = FastAPI(title="tvcli float-dashboard")
+    app.add_middleware(GZipMiddleware, minimum_size=1000)
+
+    logger.info("Initializing tvcli float-dashboard FastAPI app")
 
     if store is None:
         store = freefloat_archive.ArchiveStore()
+
+    # Reset any sync tasks that were left in "running" state because of server restart
+    try:
+        with store._connect() as conn:
+            rowcount = conn.execute(
+                "UPDATE sync_state SET last_status = ?, last_error = ? WHERE last_status = ?",
+                ("failed", "Server restarted while sync was running", "running"),
+            ).rowcount
+            if rowcount > 0:
+                logger.info(
+                    "Reset sync tasks that were left running", extra={"count": rowcount}
+                )
+    except Exception:
+        logger.exception("Failed to reset stuck sync tasks during app startup")
 
     tmp_dir = tempfile.mkdtemp(prefix="tvcli_dash_")
 
@@ -2039,6 +2060,7 @@ def create_app(store: freefloat_archive.ArchiveStore | None = None) -> FastAPI:
         try:
             from ..layers import freefloat_archive
 
+            logger.info("Background VAP free-float sync thread started")
             freefloat_archive.sync_archive(
                 latest=True,
                 since=None,
@@ -2047,12 +2069,14 @@ def create_app(store: freefloat_archive.ArchiveStore | None = None) -> FastAPI:
                 resume=False,
                 store=store,
             )
+            logger.info("Background VAP free-float sync thread completed")
         except Exception:
-            pass
+            logger.exception("Background VAP free-float sync thread failed")
 
     @app.post("/api/sync/run")
     async def run_api_sync(background_tasks: BackgroundTasks) -> Any:
         try:
+            logger.info("Starting VAP free-float sync via API")
             now = datetime.now(UTC)
             with store._connect() as conn:
                 row = conn.execute(
@@ -2063,6 +2087,10 @@ def create_app(store: freefloat_archive.ArchiveStore | None = None) -> FastAPI:
                     cooldown_time = datetime.fromisoformat(row["cooldown_until"])
                     if cooldown_time > now:
                         seconds_left = int((cooldown_time - now).total_seconds())
+                        logger.warning(
+                            "Sync request rejected due to active cooldown",
+                            extra={"seconds_left": seconds_left},
+                        )
                         return {
                             "success": False,
                             "message": f"Sync cooldown active. Try again in {seconds_left} seconds.",
@@ -2071,15 +2099,17 @@ def create_app(store: freefloat_archive.ArchiveStore | None = None) -> FastAPI:
                         }
 
             background_tasks.add_task(_bg_sync)
+            logger.info("Sync task queued successfully in background")
             return {"success": True, "message": "Sync started in background."}
         except Exception as e:
+            logger.exception("Failed to start sync via API")
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail=str(e),
             ) from e
 
     @app.get("/img/market.png")
-    async def get_img_market() -> FileResponse:
+    async def get_img_market(request: Request) -> Any:
         latest_date = get_latest_report_date()
         if not latest_date:
             raise HTTPException(
@@ -2088,18 +2118,45 @@ def create_app(store: freefloat_archive.ArchiveStore | None = None) -> FastAPI:
             )
 
         cache_key = f"market_{latest_date}"
+        etag = f'"{cache_key}"'
+
+        if_none_match = request.headers.get("if-none-match")
+        if if_none_match == etag:
+            logger.info(
+                "Serving market image via 304 Not Modified",
+                extra={"cache_key": cache_key},
+            )
+            return Response(status_code=status.HTTP_304_NOT_MODIFIED)
+
+        headers = {
+            "ETag": etag,
+            "Cache-Control": "public, max-age=3600",
+        }
+
         if cache_key in cache and cache[cache_key].exists():
-            return FileResponse(cache[cache_key], media_type="image/png")
+            logger.info(
+                "Serving market image from memory cache", extra={"cache_key": cache_key}
+            )
+            return FileResponse(
+                cache[cache_key], media_type="image/png", headers=headers
+            )
 
         out_path = Path(tmp_dir) / f"{cache_key}.png"
         try:
+            logger.info(
+                "Generating market image dashboard", extra={"cache_key": cache_key}
+            )
             req = DashboardRequest(out=out_path, market=True)
             run_dashboard(req, store=store)
             cache[cache_key] = out_path
-            return FileResponse(out_path, media_type="image/png")
+            return FileResponse(out_path, media_type="image/png", headers=headers)
         except Exception as e:
             from ..errors import NotFoundError
 
+            logger.exception(
+                "Failed to generate market image dashboard",
+                extra={"cache_key": cache_key},
+            )
             if isinstance(e, NotFoundError):
                 raise HTTPException(
                     status_code=status.HTTP_404_NOT_FOUND,
@@ -2111,7 +2168,7 @@ def create_app(store: freefloat_archive.ArchiveStore | None = None) -> FastAPI:
             ) from e
 
     @app.get("/img/symbol/{code}.png")
-    async def get_img_symbol(code: str) -> FileResponse:
+    async def get_img_symbol(code: str, request: Request) -> Any:
         symbol = code.upper()
         latest_date = get_latest_report_date()
         if not latest_date:
@@ -2121,18 +2178,47 @@ def create_app(store: freefloat_archive.ArchiveStore | None = None) -> FastAPI:
             )
 
         cache_key = f"symbol_{symbol}_{latest_date}"
+        etag = f'"{cache_key}"'
+
+        if_none_match = request.headers.get("if-none-match")
+        if if_none_match == etag:
+            logger.info(
+                "Serving symbol image via 304 Not Modified",
+                extra={"symbol": symbol, "cache_key": cache_key},
+            )
+            return Response(status_code=status.HTTP_304_NOT_MODIFIED)
+
+        headers = {
+            "ETag": etag,
+            "Cache-Control": "public, max-age=3600",
+        }
+
         if cache_key in cache and cache[cache_key].exists():
-            return FileResponse(cache[cache_key], media_type="image/png")
+            logger.info(
+                "Serving symbol image from memory cache",
+                extra={"symbol": symbol, "cache_key": cache_key},
+            )
+            return FileResponse(
+                cache[cache_key], media_type="image/png", headers=headers
+            )
 
         out_path = Path(tmp_dir) / f"{cache_key}.png"
         try:
+            logger.info(
+                "Generating symbol image dashboard",
+                extra={"symbol": symbol, "cache_key": cache_key},
+            )
             req = DashboardRequest(out=out_path, symbol=symbol)
             run_dashboard(req, store=store)
             cache[cache_key] = out_path
-            return FileResponse(out_path, media_type="image/png")
+            return FileResponse(out_path, media_type="image/png", headers=headers)
         except Exception as e:
             from ..errors import NotFoundError
 
+            logger.exception(
+                "Failed to generate symbol image dashboard",
+                extra={"symbol": symbol, "cache_key": cache_key},
+            )
             if isinstance(e, NotFoundError):
                 raise HTTPException(
                     status_code=status.HTTP_404_NOT_FOUND,
