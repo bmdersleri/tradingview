@@ -246,6 +246,14 @@ def _bg_sync(store: ArchiveStore, ws_manager: ConnectionManager) -> None:
         from ...layers import freefloat_archive
 
         logger.info("Background VAP free-float sync thread started")
+
+        def progress_callback(progress_info: dict[str, Any]) -> None:
+            try:
+                anyio.from_thread.run(ws_manager.broadcast, progress_info)
+            except Exception:
+                pass
+
+        # Also send the initial sync_started event
         anyio.from_thread.run(ws_manager.broadcast, {"event": "sync_started"})
 
         freefloat_archive.sync_archive(
@@ -255,6 +263,7 @@ def _bg_sync(store: ArchiveStore, ws_manager: ConnectionManager) -> None:
             max_days=None,
             resume=False,
             store=store,
+            on_progress=progress_callback,
         )
         logger.info("Background VAP free-float sync thread completed")
         anyio.from_thread.run(ws_manager.broadcast, {"event": "sync_completed"})

@@ -6,6 +6,7 @@ from __future__ import annotations
 import json
 import math
 import sqlite3
+import threading
 import time
 from collections.abc import Callable, Iterable, Iterator
 from contextlib import contextmanager
@@ -17,7 +18,7 @@ from statistics import fmean, pstdev
 from typing import Any
 
 from ..cache import SQLiteTTLCache
-from ..config import default_archive_path, default_cache_path
+from ..config import default_archive_path, default_cache_path, default_data_dir
 from ..errors import NotFoundError, RateLimitedError, UsageError
 from ..logging_utils import setup_logger
 from ..ratelimit import SQLiteTokenBucket
@@ -76,6 +77,7 @@ def _trend_direction(values: list[float]) -> str:
 
 class ArchiveStore:
     _initialized_paths: set[str] = set()
+    _write_lock = threading.Lock()
 
     def __init__(
         self,
@@ -102,24 +104,36 @@ class ArchiveStore:
         return self._now().isoformat()
 
     @contextmanager
-    def _connect(self) -> Iterator[sqlite3.Connection]:
+    def _connect(self, write: bool = False) -> Iterator[sqlite3.Connection]:
         """Yield a connection that commits on clean exit and always closes.
 
         sqlite3's own ``with conn`` only manages the transaction, leaving the
         connection open (ResourceWarning). This wraps both concerns.
         """
-        conn = sqlite3.connect(self.path, timeout=10.0)
+        if write:
+            ArchiveStore._write_lock.acquire()
+        conn = sqlite3.connect(self.path, timeout=30.0)
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA journal_mode=WAL;")
         conn.execute("PRAGMA synchronous=NORMAL;")
         try:
+            if write:
+                conn.execute("BEGIN IMMEDIATE;")
             yield conn
             conn.commit()
+        except Exception:
+            try:
+                conn.rollback()
+            except sqlite3.OperationalError:
+                pass
+            raise
         finally:
             conn.close()
+            if write:
+                ArchiveStore._write_lock.release()
 
     def _ensure_schema(self) -> None:
-        with self._connect() as conn:
+        with self._connect(write=True) as conn:
             conn.executescript(
                 """
                 CREATE TABLE IF NOT EXISTS freefloat_reports (
@@ -289,7 +303,7 @@ class ArchiveStore:
 
     def mark_empty(self, report_date: date) -> None:
         """Record that a date has no published report (weekend/holiday)."""
-        with self._connect() as conn:
+        with self._connect(write=True) as conn:
             conn.execute(
                 """
                 INSERT INTO freefloat_missing(report_date, checked_at)
@@ -318,7 +332,7 @@ class ArchiveStore:
         digest = sha256(payload).hexdigest()
         touched = {row.code for row in records}
 
-        with self._connect() as conn:
+        with self._connect(write=True) as conn:
             conn.execute(
                 """
                 INSERT INTO freefloat_reports(
@@ -1290,6 +1304,7 @@ def sync_archive(
     resume: bool,
     rate_seconds: float = _DEFAULT_RATE_SECONDS,
     store: ArchiveStore | None = None,
+    on_progress: Callable[[dict[str, Any]], None] | None = None,
 ) -> dict[str, Any]:
     store = store or ArchiveStore()
     synced: list[dict[str, Any]] = []
@@ -1301,6 +1316,17 @@ def sync_archive(
     )
 
     if latest:
+        if on_progress:
+            try:
+                on_progress(
+                    {
+                        "event": "sync_progress",
+                        "status": "started",
+                        "mode": "latest",
+                    }
+                )
+            except Exception:
+                pass
         claim = store.claim_sync_slot(_SYNC_SOURCE_VAP)
         try:
             logger.info("Fetching latest VAP free-float report")
@@ -1319,6 +1345,17 @@ def sync_archive(
                 status="not_found",
                 error=error.message,
             )
+            if on_progress:
+                try:
+                    on_progress(
+                        {
+                            "event": "sync_progress",
+                            "status": "not_found",
+                            "error": error.message,
+                        }
+                    )
+                except Exception:
+                    pass
             raise
         except Exception as error:
             message = getattr(error, "message", str(error))
@@ -1328,6 +1365,17 @@ def sync_archive(
                 status="error",
                 error=message,
             )
+            if on_progress:
+                try:
+                    on_progress(
+                        {
+                            "event": "sync_progress",
+                            "status": "failed",
+                            "error": message,
+                        }
+                    )
+                except Exception:
+                    pass
             raise
         store.complete_sync_slot(
             _SYNC_SOURCE_VAP,
@@ -1338,6 +1386,19 @@ def sync_archive(
             store.update_symbol_metadata()
         except Exception:
             pass
+        _run_auto_backup(store)
+        if on_progress:
+            try:
+                on_progress(
+                    {
+                        "event": "sync_progress",
+                        "status": "completed",
+                        "synced_count": 1,
+                        "report_date": result["report_date"],
+                    }
+                )
+            except Exception:
+                pass
         return {
             "mode": "latest",
             "synced_reports": 1,
@@ -1369,6 +1430,18 @@ def sync_archive(
         clock=lambda: store._now().timestamp(),
     )
 
+    if on_progress:
+        try:
+            on_progress(
+                {
+                    "event": "sync_progress",
+                    "status": "started",
+                    "mode": "range",
+                }
+            )
+        except Exception:
+            pass
+
     attempted = False
     last_report_date: str | None = None
     fetched_in_session = 0
@@ -1383,6 +1456,20 @@ def sync_archive(
             if fetched_in_session:
                 _sleep(rate_seconds)
             attempted = True
+            if on_progress:
+                try:
+                    on_progress(
+                        {
+                            "event": "sync_progress",
+                            "status": "processing",
+                            "date": candidate.isoformat(),
+                            "skipped": skipped,
+                            "synced": len(synced),
+                            "missing": missing,
+                        }
+                    )
+                except Exception:
+                    pass
             try:
                 logger.info(
                     "Fetching free-float report for date",
@@ -1414,6 +1501,17 @@ def sync_archive(
         message = getattr(error, "message", str(error))
         logger.error("Backfill sync failed", exc_info=True)
         store.complete_sync_slot(_SYNC_SOURCE_VAP, status="error", error=message)
+        if on_progress:
+            try:
+                on_progress(
+                    {
+                        "event": "sync_progress",
+                        "status": "failed",
+                        "error": message,
+                    }
+                )
+            except Exception:
+                pass
         raise
 
     store.complete_sync_slot(
@@ -1426,6 +1524,20 @@ def sync_archive(
             store.update_symbol_metadata()
         except Exception:
             pass
+        _run_auto_backup(store)
+
+    if on_progress:
+        try:
+            on_progress(
+                {
+                    "event": "sync_progress",
+                    "status": "completed",
+                    "synced_count": len(synced),
+                    "report_date": last_report_date,
+                }
+            )
+        except Exception:
+            pass
 
     return {
         "mode": "range",
@@ -1436,3 +1548,31 @@ def sync_archive(
         "sync": claim,
         "attempted_fetch": attempted,
     }
+
+
+def _run_auto_backup(store: ArchiveStore) -> None:
+    """Run rotation backup keeping the last 7 files."""
+    try:
+        backup_dir = default_data_dir() / "backups"
+        backup_dir.mkdir(parents=True, exist_ok=True)
+
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        backup_path = backup_dir / f"backup_{timestamp}.sqlite3"
+
+        logger.info(f"Running auto-backup to {backup_path}")
+        store.backup(backup_path)
+
+        # Auto-rotate: keep only the 7 most recent backups
+        backups = sorted(
+            [f for f in backup_dir.glob("backup_*.sqlite3") if f.is_file()],
+            key=lambda x: x.stat().st_mtime,
+        )
+        if len(backups) > 7:
+            for old_backup in backups[:-7]:
+                try:
+                    old_backup.unlink()
+                    logger.info(f"Deleted old auto-backup: {old_backup}")
+                except Exception as e:
+                    logger.warning(f"Failed to delete old backup {old_backup}: {e}")
+    except Exception as e:
+        logger.error(f"Auto-backup failed: {e}", exc_info=True)

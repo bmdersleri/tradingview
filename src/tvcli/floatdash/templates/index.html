@@ -810,6 +810,25 @@
                         </div>
                     </form>
                 </div>
+
+                <div class="card" style="margin-top: 1rem;">
+                    <h3 style="margin-bottom: 0.5rem; display: flex; align-items: center; gap: 0.5rem; color: var(--accent-color);">
+                        <span>💾</span> Veritabanı Yedekleme & Geri Yükleme
+                    </h3>
+                    <p style="font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 1.5rem;">
+                        Veritabanını bilgisayarınıza indirebilir veya daha önce aldığınız bir yedek dosyasını geri yükleyebilirsiniz.
+                    </p>
+                    <div style="display: flex; gap: 1rem; align-items: center;">
+                        <button type="button" onclick="downloadBackup()" class="btn" style="background-color: transparent; border: 1px solid var(--border-color); color: var(--text-primary); display: flex; align-items: center; gap: 0.5rem;">
+                            <span>📥</span> Yedeği İndir (.sqlite3)
+                        </button>
+                        <button type="button" onclick="triggerRestoreUpload()" class="btn" style="background-color: var(--warning); border-color: var(--warning); color: white; display: flex; align-items: center; gap: 0.5rem;">
+                            <span>📤</span> Yedeği Geri Yükle
+                        </button>
+                        <input type="file" id="backupRestoreInput" accept=".sqlite3" style="display: none;" onchange="handleBackupUpload(event)" />
+                        <span id="backupStatusText" style="font-size: 0.85rem; color: var(--text-secondary);"></span>
+                    </div>
+                </div>
             </div>
             
             <!-- KAP Detail Modal -->
@@ -2213,6 +2232,24 @@
                     } else if (data.event === 'sync_failed') {
                         updateSyncStatusHeader();
                         alert(`Eşitleme hatası: ${data.error || 'Bilinmeyen hata'}`);
+                    } else if (data.event === 'sync_progress') {
+                        const text = document.getElementById('syncStatusText');
+                        if (text) {
+                            if (data.status === 'started') {
+                                text.innerText = 'Eşitleme başladı...';
+                            } else if (data.status === 'processing') {
+                                text.innerText = `Eşitleniyor: ${parseDateLabel(data.date)}`;
+                            } else if (data.status === 'completed') {
+                                text.innerText = `Eşitleme tamamlandı (${data.synced_count} gün)`;
+                                updateSyncStatusHeader();
+                            } else if (data.status === 'failed') {
+                                text.innerText = `Eşitleme başarısız: ${data.error}`;
+                                updateSyncStatusHeader();
+                            }
+                        }
+                    } else if (data.event === 'database_restored') {
+                        alert("Veritabanı yedekten başarıyla geri yüklendi! Sayfa yenileniyor...");
+                        location.reload();
                     }
                 } catch (e) {
                     console.error("Error parsing WebSocket message:", e);
@@ -2384,6 +2421,54 @@
                 .catch(err => {
                     console.error(err);
                     alert("Test sırasında hata oluştu: " + err.message);
+                });
+        }
+
+        function downloadBackup() {
+            window.location.href = '/api/settings/backup/download';
+        }
+
+        function triggerRestoreUpload() {
+            const input = document.getElementById('backupRestoreInput');
+            if (input) input.click();
+        }
+
+        function handleBackupUpload(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            if (!confirm("⚠️ DİKKAT: Veritabanını bu yedek dosyası ile geri yüklemek istediğinizden emin misiniz? Mevcut tüm veriler silinecektir!")) {
+                event.target.value = '';
+                return;
+            }
+
+            const statusText = document.getElementById('backupStatusText');
+            if (statusText) statusText.innerText = "Yükleniyor ve geri yükleniyor...";
+
+            const formData = new FormData();
+            formData.append("file", file);
+
+            fetch('/api/settings/backup/restore', {
+                method: 'POST',
+                body: formData
+            })
+                .then(r => r.json())
+                .then(res => {
+                    if (statusText) statusText.innerText = "";
+                    if (res.status === 'success') {
+                        alert("Veritabanı yedekten başarıyla geri yüklendi! Sayfa yenileniyor...");
+                        location.reload();
+                    } else {
+                        alert("Geri yükleme başarısız: " + res.message);
+                    }
+                })
+                .catch(err => {
+                    if (statusText) statusText.innerText = "";
+                    console.error(err);
+                    alert("Yükleme sırasında hata oluştu: " + err.message);
+                })
+                .finally(() => {
+                    event.target.value = '';
                 });
         }
 

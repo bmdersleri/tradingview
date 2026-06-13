@@ -1,13 +1,18 @@
 # ruff: noqa: B008, E501
 from __future__ import annotations
 
+import os
+import shutil
 from typing import Any
 
 import httpx
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
-from ...config import load_config, resolve_setting, save_config
+from ...config import default_data_dir, load_config, resolve_setting, save_config
+from ...layers.freefloat_archive import ArchiveStore
+from ..dependencies import ConnectionManager, get_store, get_ws_manager
 
 router = APIRouter(prefix="/api/settings", tags=["settings"])
 
@@ -151,3 +156,60 @@ async def test_settings(payload: SettingsTest) -> Any:
         return {"status": "error", "message": "; ".join(errors)}
 
     return {"status": "success", "message": "Test notification sent successfully."}
+
+
+@router.get("/backup/download")
+async def download_backup(store: ArchiveStore = Depends(get_store)) -> FileResponse:
+    try:
+        temp_dir = default_data_dir() / "backups"
+        temp_dir.mkdir(parents=True, exist_ok=True)
+        temp_file = temp_dir / "temp_download.sqlite3"
+
+        # Safely backup the live database to the temp file
+        store.backup(temp_file)
+
+        return FileResponse(
+            path=str(temp_file),
+            filename="tvcli_archive_backup.sqlite3",
+            media_type="application/x-sqlite3",
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to generate backup for download: {str(e)}",
+        ) from e
+
+
+@router.post("/backup/restore")
+async def restore_backup(
+    file: UploadFile = File(...),
+    store: ArchiveStore = Depends(get_store),
+    ws_manager: ConnectionManager = Depends(get_ws_manager),
+) -> Any:
+    temp_file_path = default_data_dir() / "backups" / "temp_upload.sqlite3"
+    try:
+        temp_file_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(temp_file_path, "wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
+
+        # Safely restore the database from the temp upload file
+        store.restore(temp_file_path)
+
+        # Notify clients about the database update
+        await ws_manager.broadcast({"event": "database_restored"})
+
+        return {
+            "status": "success",
+            "message": "Database successfully restored from backup.",
+        }
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to restore database from backup: {str(e)}",
+        ) from e
+    finally:
+        if temp_file_path.exists():
+            try:
+                os.remove(temp_file_path)
+            except Exception:
+                pass
