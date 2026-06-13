@@ -86,7 +86,7 @@ def create_app(store: freefloat_archive.ArchiveStore | None = None) -> FastAPI:
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700&display=swap" rel="stylesheet">
     <!-- TradingView Lightweight Charts & Chart.js -->
-    <script src="https://unpkg.com/lightweight-charts/dist/lightweight-charts.standalone.production.js"></script>
+    <script src="https://unpkg.com/lightweight-charts@4.1.1/dist/lightweight-charts.standalone.production.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
         :root {
@@ -1729,6 +1729,15 @@ def create_app(store: freefloat_archive.ArchiveStore | None = None) -> FastAPI:
                         losersBody.innerHTML = '<tr><td colspan="4" style="text-align: center; color: var(--text-secondary); padding: 1rem;">Veri bulunamadı (Karşılaştırma için en az iki rapor gereklidir).</td></tr>';
                     }
                 }
+
+                // Cache and load market charts & sectors heatmap
+                cachedMarketData = data;
+                createMarketCharts(data);
+
+                fetch('/api/market/sectors')
+                    .then(r => r.ok ? r.json() : [])
+                    .then(sectors => renderSectorHeatmap(sectors))
+                    .catch(err => console.error("Failed to load sectors heatmap:", err));
             } catch (err) {
                 console.error("Failed to load leaderboard:", err);
             }
