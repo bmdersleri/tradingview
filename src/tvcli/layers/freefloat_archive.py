@@ -171,7 +171,8 @@ class ArchiveStore:
                     severity TEXT NOT NULL,
                     metric_value REAL,
                     threshold_value REAL,
-                    payload_json TEXT NOT NULL
+                    payload_json TEXT NOT NULL,
+                    status TEXT DEFAULT 'sent'
                 );
 
                 CREATE INDEX IF NOT EXISTS idx_freefloat_events_code_date
@@ -219,6 +220,12 @@ class ArchiveStore:
                 );
                 """
             )
+            try:
+                conn.execute(
+                    "ALTER TABLE freefloat_events ADD COLUMN status TEXT DEFAULT 'sent'"
+                )
+            except sqlite3.OperationalError:
+                pass
 
     def _parse_ts(self, value: str | None) -> datetime | None:
         if not value:

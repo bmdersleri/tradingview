@@ -20,6 +20,21 @@ from ..logging_utils import setup_logger
 
 logger = setup_logger("tvcli.floatdash")
 
+from pydantic import BaseModel, Field
+
+class SettingsUpdate(BaseModel):
+    telegram_token: str | None = None
+    telegram_chat_id: str | None = None
+    webhook_url: str | None = None
+    low_float_threshold: float = Field(20.0, ge=0.0, le=100.0)
+    severe_low_float_threshold: float = Field(10.0, ge=0.0, le=100.0)
+    ratio_jump_threshold: float = Field(5.0, ge=0.0, le=100.0)
+
+class SettingsTest(BaseModel):
+    telegram_token: str | None = None
+    telegram_chat_id: str | None = None
+    webhook_url: str | None = None
+
 
 def create_app(store: freefloat_archive.ArchiveStore | None = None) -> FastAPI:
     app = FastAPI(title="tvcli float-dashboard")
@@ -444,6 +459,17 @@ def create_app(store: freefloat_archive.ArchiveStore | None = None) -> FastAPI:
             50% { opacity: 1.0; }
             100% { opacity: 0.4; }
         }
+
+        .active-tab {
+            background-color: var(--accent-color) !important;
+            border-color: var(--accent-hover) !important;
+            color: white !important;
+        }
+
+        .tabs-container button:not(.active-tab):hover {
+            background-color: rgba(255, 255, 255, 0.05) !important;
+            color: var(--text-primary) !important;
+        }
     </style>
 </head>
 <body>
@@ -452,10 +478,15 @@ def create_app(store: freefloat_archive.ArchiveStore | None = None) -> FastAPI:
             <span class="logo-icon">📊</span>
             <span class="logo-title">BIST Free-Float Terminal</span>
         </div>
-        <div id="syncStatusHeader" style="display: flex; align-items: center; gap: 0.6rem; font-size: 0.8rem; background-color: rgba(24, 28, 39, 0.6); border: 1px solid var(--border-color); padding: 0.35rem 0.75rem; border-radius: 6px; margin-right: auto; margin-left: 2rem;">
+        <div id="syncStatusHeader" style="display: flex; align-items: center; gap: 0.6rem; font-size: 0.8rem; background-color: rgba(24, 28, 39, 0.6); border: 1px solid var(--border-color); padding: 0.35rem 0.75rem; border-radius: 6px; margin-left: 2rem; margin-right: 0;">
             <span id="syncStatusDot" style="width: 8px; height: 8px; border-radius: 50%; background-color: var(--bullish); display: inline-block;"></span>
             <span id="syncStatusText" style="color: var(--text-primary); font-weight: 500;">Veri Durumu Yükleniyor...</span>
             <button id="syncNowBtn" onclick="triggerSync()" class="btn" style="padding: 0.15rem 0.5rem; font-size: 0.75rem; border-radius: 4px; line-height: 1; margin-left: 0.5rem;">Eşitle</button>
+        </div>
+        <div class="tabs-container" style="display: flex; gap: 0.5rem; margin-right: auto; margin-left: 1.5rem;">
+            <button id="tabDashboard" class="btn active-tab" onclick="switchMainTab('dashboard')" style="padding: 0.35rem 0.75rem; font-size: 0.85rem; border-radius: 6px; font-weight: 600;">Dashboard</button>
+            <button id="tabAlerts" class="btn" onclick="switchMainTab('alerts')" style="padding: 0.35rem 0.75rem; font-size: 0.85rem; border-radius: 6px; font-weight: 600; background: none; border: 1px solid transparent;">Alarmlar</button>
+            <button id="tabSettings" class="btn" onclick="switchMainTab('settings')" style="padding: 0.35rem 0.75rem; font-size: 0.85rem; border-radius: 6px; font-weight: 600; background: none; border: 1px solid transparent;">Ayarlar</button>
         </div>
         <div class="search-container">
             <div style="position: relative; display: flex; align-items: center;">
@@ -483,7 +514,8 @@ def create_app(store: freefloat_archive.ArchiveStore | None = None) -> FastAPI:
         <main class="content-area">
             <div id="errorBox" class="error-box"></div>
 
-            <div id="marketInfoBar" class="info-bar">
+            <div id="dashboardView">
+                <div id="marketInfoBar" class="info-bar">
                 <div class="info-card">
                     <span class="info-label">Piyasa Medyan Oranı</span>
                     <span id="marketMedianRatio" class="info-value">-</span>
@@ -724,6 +756,136 @@ def create_app(store: freefloat_archive.ArchiveStore | None = None) -> FastAPI:
                             <tr><td colspan="4" style="text-align: center; color: var(--text-secondary); padding: 1.5rem;">Hisse analizi yüklenince burası güncellenecektir.</td></tr>
                         </tbody>
                     </table>
+                </div>
+            </div>
+            </div> <!-- end dashboardView -->
+
+            <!-- Alert History Tab View -->
+            <div id="alertsHistoryView" style="display: none; flex-direction: column; gap: 1.5rem;">
+                <div class="card">
+                    <h3 style="margin-bottom: 0.5rem; display: flex; align-items: center; gap: 0.5rem; color: var(--accent-color);">
+                        <span>🔔</span> Alarm Geçmişi & Log Akışı
+                    </h3>
+                    <p style="font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 1rem;">
+                        Sistem tarafından üretilen ve yapılandırılan kanallara iletilen geçmiş tüm fiili dolaşım alarmları.
+                    </p>
+
+                    <!-- Filters -->
+                    <div style="display: flex; gap: 1rem; align-items: center; flex-wrap: wrap; margin-bottom: 1rem; background-color: rgba(24, 28, 39, 0.4); padding: 0.75rem 1rem; border-radius: 8px; border: 1px solid var(--border-color); font-size: 0.85rem;">
+                        <div style="display: flex; align-items: center; gap: 0.5rem;">
+                            <span>Hisse:</span>
+                            <input type="text" id="alertFilterSymbol" placeholder="örn: THYAO" oninput="fetchAlertsHistory()" style="background-color: #1e222d; border: 1px solid var(--border-color); color: var(--text-primary); padding: 0.25rem 0.5rem; border-radius: 4px; outline: none; width: 100px;" />
+                        </div>
+                        <div style="display: flex; align-items: center; gap: 0.5rem;">
+                            <span>Önem:</span>
+                            <select id="alertFilterSeverity" onchange="fetchAlertsHistory()" style="background-color: #1e222d; border: 1px solid var(--border-color); color: var(--text-primary); padding: 0.25rem 0.5rem; border-radius: 4px; outline: none;">
+                                <option value="all">Tümü</option>
+                                <option value="high">Yüksek (High)</option>
+                                <option value="medium">Orta (Medium)</option>
+                            </select>
+                        </div>
+                        <div style="display: flex; align-items: center; gap: 0.5rem;">
+                            <span>Olay Tipi:</span>
+                            <select id="alertFilterEventType" onchange="fetchAlertsHistory()" style="background-color: #1e222d; border: 1px solid var(--border-color); color: var(--text-primary); padding: 0.25rem 0.5rem; border-radius: 4px; outline: none;">
+                                <option value="all">Tümü</option>
+                                <option value="liquidity_risk_low_float">Düşük Dolaşım Riski</option>
+                                <option value="ratio_threshold_cross_down">Kritik Eşik Altına Geçiş</option>
+                                <option value="ratio_threshold_cross_up">Eşik Üstüne Geçiş</option>
+                                <option value="ratio_jump_up">Sert Dolaşım Artışı</option>
+                                <option value="ratio_jump_down">Sert Dolaşım Düşüşü</option>
+                            </select>
+                        </div>
+                        <button onclick="fetchAlertsHistory()" class="btn" style="padding: 0.25rem 0.75rem; border-radius: 4px; font-size: 0.8rem; margin-left: auto;">Yenile</button>
+                    </div>
+
+                    <!-- Alerts Table -->
+                    <div style="overflow-x: auto;">
+                        <table class="events-table">
+                            <thead>
+                                <tr>
+                                    <th>Tarih</th>
+                                    <th>Hisse</th>
+                                    <th>Olay Tipi</th>
+                                    <th>Açıklama</th>
+                                    <th>Değer</th>
+                                    <th>Önem</th>
+                                    <th>Durum</th>
+                                </tr>
+                            </thead>
+                            <tbody id="alertsHistoryBody">
+                                <tr><td colspan="7" style="text-align: center; color: var(--text-secondary); padding: 2rem;">Alarm geçmişi yükleniyor...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Settings Tab View -->
+            <div id="settingsView" style="display: none; flex-direction: column; gap: 1.5rem; max-width: 800px; margin: 0 auto; width: 100%;">
+                <div class="card">
+                    <h3 style="margin-bottom: 0.5rem; display: flex; align-items: center; gap: 0.5rem; color: var(--accent-color);">
+                        <span>⚙️</span> Sistem Ayarları & Eşik Tanımları
+                    </h3>
+                    <p style="font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 1.5rem;">
+                        Telegram bot entegrasyonu, webhook hedefleri ve alarm üretecek fiili dolaşım eşik değerlerini buradan düzenleyebilirsiniz.
+                    </p>
+
+                    <form id="settingsForm" onsubmit="saveSettings(event)" style="display: flex; flex-direction: column; gap: 1.5rem;">
+                        <!-- Telegram Settings Section -->
+                        <div style="border-bottom: 1px solid var(--border-color); padding-bottom: 1.5rem;">
+                            <h4 style="margin-bottom: 1rem; color: var(--text-primary); font-size: 0.95rem; display: flex; align-items: center; gap: 0.4rem;">
+                                <span>📱</span> Telegram Bot Bildirim Kanalı
+                            </h4>
+                            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
+                                <div style="display: flex; flex-direction: column; gap: 0.4rem;">
+                                    <label style="font-size: 0.8rem; color: var(--text-secondary); font-weight: 500;">Telegram Bot Token:</label>
+                                    <input type="password" id="settingTelegramToken" placeholder="Mevcut token gizlenmiştir..." style="background-color: #1e222d; border: 1px solid var(--border-color); color: var(--text-primary); padding: 0.5rem; border-radius: 6px; outline: none; font-family: inherit; font-size: 0.9rem;" />
+                                </div>
+                                <div style="display: flex; flex-direction: column; gap: 0.4rem;">
+                                    <label style="font-size: 0.8rem; color: var(--text-secondary); font-weight: 500;">Telegram Chat ID:</label>
+                                    <input type="text" id="settingTelegramChatId" placeholder="Örn: -100123456789" style="background-color: #1e222d; border: 1px solid var(--border-color); color: var(--text-primary); padding: 0.5rem; border-radius: 6px; outline: none; font-family: inherit; font-size: 0.9rem;" />
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Webhook Settings Section -->
+                        <div style="border-bottom: 1px solid var(--border-color); padding-bottom: 1.5rem;">
+                            <h4 style="margin-bottom: 1rem; color: var(--text-primary); font-size: 0.95rem; display: flex; align-items: center; gap: 0.4rem;">
+                                <span>🔗</span> Webhook Bildirim Kanalı
+                            </h4>
+                            <div style="display: flex; flex-direction: column; gap: 0.4rem;">
+                                <label style="font-size: 0.8rem; color: var(--text-secondary); font-weight: 500;">Webhook URL:</label>
+                                <input type="url" id="settingWebhookUrl" placeholder="Örn: https://kendi-sunucunuz.com/api/hook" style="background-color: #1e222d; border: 1px solid var(--border-color); color: var(--text-primary); padding: 0.5rem; border-radius: 6px; outline: none; font-family: inherit; font-size: 0.9rem;" />
+                            </div>
+                        </div>
+
+                        <!-- Threshold Settings Section -->
+                        <div style="padding-bottom: 0.5rem;">
+                            <h4 style="margin-bottom: 1rem; color: var(--text-primary); font-size: 0.95rem; display: flex; align-items: center; gap: 0.4rem;">
+                                <span>📈</span> Fiili Dolaşım Alarm Eşikleri (%)
+                            </h4>
+                            <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 1rem;">
+                                <div style="display: flex; flex-direction: column; gap: 0.4rem;">
+                                    <label style="font-size: 0.8rem; color: var(--text-secondary); font-weight: 500;">Riskli Alt Sınır (%):</label>
+                                    <input type="number" step="0.1" id="settingLowFloat" style="background-color: #1e222d; border: 1px solid var(--border-color); color: var(--text-primary); padding: 0.5rem; border-radius: 6px; outline: none; font-family: inherit; font-size: 0.9rem;" />
+                                </div>
+                                <div style="display: flex; flex-direction: column; gap: 0.4rem;">
+                                    <label style="font-size: 0.8rem; color: var(--text-secondary); font-weight: 500;">Kritik Alt Sınır (%):</label>
+                                    <input type="number" step="0.1" id="settingSevereLowFloat" style="background-color: #1e222d; border: 1px solid var(--border-color); color: var(--text-primary); padding: 0.5rem; border-radius: 6px; outline: none; font-family: inherit; font-size: 0.9rem;" />
+                                </div>
+                                <div style="display: flex; flex-direction: column; gap: 0.4rem;">
+                                    <label style="font-size: 0.8rem; color: var(--text-secondary); font-weight: 500;">Sert Değişim Sıçraması (%):</label>
+                                    <input type="number" step="0.1" id="settingRatioJump" style="background-color: #1e222d; border: 1px solid var(--border-color); color: var(--text-primary); padding: 0.5rem; border-radius: 6px; outline: none; font-family: inherit; font-size: 0.9rem;" />
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Form Actions -->
+                        <div style="display: flex; gap: 1rem; justify-content: flex-end; margin-top: 1rem;">
+                            <button type="button" onclick="testAlertSettings()" class="btn" style="background-color: transparent; border: 1px solid var(--border-color); color: var(--text-primary);">Bağlantıyı Test Et</button>
+                            <button type="submit" class="btn" style="background-color: var(--accent-color); border-color: var(--accent-hover); color: white;">Ayarları Kaydet</button>
+                        </div>
+                    </form>
                 </div>
             </div>
         </main>
@@ -1273,7 +1435,7 @@ def create_app(store: freefloat_archive.ArchiveStore | None = None) -> FastAPI:
 
             const lowestItems = data.leaderboard.slice(0, 15);
             const leadCtx = document.getElementById('leaderboardChart').getContext('2d');
-            
+
             const leadColors = lowestItems.map(item => {
                 if (item.ratio < 10.0) return 'rgba(239, 83, 80, 0.75)';
                 if (item.ratio < 20.0) return 'rgba(245, 124, 0, 0.75)';
@@ -1545,12 +1707,13 @@ def create_app(store: freefloat_archive.ArchiveStore | None = None) -> FastAPI:
         }
 
         function loadMarketOverview() {
+            switchMainTab('dashboard');
             activeCode = 'MARKET';
             document.getElementById('errorBox').style.display = 'none';
             document.getElementById('infoBar').style.display = 'none';
             document.getElementById('symbolEventsCard').style.display = 'none';
             document.getElementById('symbolChartsContainer').style.display = 'none';
-            
+
             document.getElementById('marketInfoBar').style.display = 'grid';
             document.getElementById('marketInsightsContainer').style.display = 'grid';
             document.getElementById('marketChartsContainer').style.display = 'grid';
@@ -1572,6 +1735,7 @@ def create_app(store: freefloat_archive.ArchiveStore | None = None) -> FastAPI:
         }
 
         async function loadSymbol(code) {
+            switchMainTab('dashboard');
             activeCode = code.toUpperCase();
             document.getElementById('errorBox').style.display = 'none';
             document.getElementById('marketEventsCard').style.display = 'none';
@@ -1579,7 +1743,7 @@ def create_app(store: freefloat_archive.ArchiveStore | None = None) -> FastAPI:
             document.getElementById('marketInsightsContainer').style.display = 'none';
             document.getElementById('marketChartsContainer').style.display = 'none';
             document.getElementById('sectorHeatmapCard').style.display = 'none';
-            
+
             // Clear comparison list
             compareSymbols = [];
             compareDataStore = {};
@@ -1745,7 +1909,7 @@ def create_app(store: freefloat_archive.ArchiveStore | None = None) -> FastAPI:
                 const data = await response.json();
                 compareDataStore[code] = data;
                 compareSymbols.push(code);
-                
+
                 hideLoader();
                 renderComparisonChips();
                 renderComparisonChart();
@@ -1902,7 +2066,7 @@ def create_app(store: freefloat_archive.ArchiveStore | None = None) -> FastAPI:
         function renderSectorHeatmap(sectors) {
             const grid = document.getElementById('sectorHeatmapGrid');
             grid.innerHTML = '';
-            
+
             if (!sectors || sectors.length === 0) {
                 grid.innerHTML = '<p style="text-align: center; color: var(--text-secondary); padding: 2rem; grid-column: 1 / -1;">Sektör verisi bulunamadı. Lütfen önce veri eşitlemesi yapın.</p>';
                 return;
@@ -1917,30 +2081,30 @@ def create_app(store: freefloat_archive.ArchiveStore | None = None) -> FastAPI:
             sectors.forEach(sec => {
                 const card = document.createElement('div');
                 card.style = 'background-color: rgba(24, 28, 39, 0.3); border: 1px solid var(--border-color); border-radius: 8px; padding: 1rem; display: flex; flex-direction: column; gap: 0.75rem;';
-                
+
                 const header = document.createElement('div');
                 header.style = 'display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid rgba(255, 255, 255, 0.05); padding-bottom: 0.5rem;';
-                
+
                 const title = document.createElement('span');
                 title.style = 'font-weight: 600; font-size: 0.85rem; color: var(--text-primary); text-transform: uppercase;';
                 title.innerText = sec.sector === 'Bilinmeyen' ? 'DİĞER SEKTÖRLER' : sec.sector;
-                
+
                 const stats = document.createElement('span');
                 stats.style = 'font-size: 0.8rem; font-weight: 600;';
                 let medColor = 'var(--bullish)';
                 if (sec.median_ratio < 10.0) medColor = 'var(--bearish)';
                 else if (sec.median_ratio < 20.0) medColor = 'var(--warning)';
-                
+
                 stats.style.color = medColor;
                 stats.innerText = `Medyan: %${sec.median_ratio.toFixed(2)}`;
-                
+
                 header.appendChild(title);
                 header.appendChild(stats);
                 card.appendChild(header);
-                
+
                 const symbolsDiv = document.createElement('div');
                 symbolsDiv.style = 'display: flex; flex-wrap: wrap; gap: 0.4rem; align-content: flex-start;';
-                
+
                 sec.symbols.forEach(sym => {
                     const box = document.createElement('div');
                     let color = 'rgba(38, 166, 154, 0.1)';
@@ -1955,16 +2119,16 @@ def create_app(store: freefloat_archive.ArchiveStore | None = None) -> FastAPI:
                         borderColor = 'rgba(245, 124, 0, 0.3)';
                         textColor = 'var(--warning)';
                     }
-                    
+
                     box.style = `background-color: ${color}; border: 1px solid ${borderColor}; color: ${textColor}; padding: 0.3rem 0.45rem; border-radius: 4px; font-size: 0.75rem; font-weight: 600; cursor: pointer; transition: all 0.2s; position: relative;`;
                     box.title = `${sym.name}\nDolaşım Oranı: %${sym.ratio.toFixed(2)}\nDolaşımdaki Nominal Sermaye: ${formatVolume(sym.weight)} TRY`;
                     box.innerText = sym.code;
-                    
+
                     box.onclick = (e) => {
                         e.stopPropagation();
                         loadSymbol(sym.code);
                     };
-                    
+
                     box.onmouseover = () => {
                         box.style.transform = 'scale(1.08)';
                         box.style.boxShadow = '0 2px 8px rgba(0,0,0,0.5)';
@@ -1977,10 +2141,10 @@ def create_app(store: freefloat_archive.ArchiveStore | None = None) -> FastAPI:
                         box.style.borderColor = borderColor;
                         box.style.backgroundColor = color;
                     };
-                    
+
                     symbolsDiv.appendChild(box);
                 });
-                
+
                 card.appendChild(symbolsDiv);
                 grid.appendChild(card);
             });
@@ -1997,13 +2161,13 @@ def create_app(store: freefloat_archive.ArchiveStore | None = None) -> FastAPI:
                 const response = await fetch('/api/sync/status');
                 if (!response.ok) return;
                 const data = await response.json();
-                
+
                 const dot = document.getElementById('syncStatusDot');
                 const text = document.getElementById('syncStatusText');
                 const btn = document.getElementById('syncNowBtn');
-                
+
                 const state = data.sync_state;
-                
+
                 if (state.last_status === 'running') {
                     isSyncing = true;
                     dot.style.backgroundColor = 'var(--warning)';
@@ -2012,7 +2176,7 @@ def create_app(store: freefloat_archive.ArchiveStore | None = None) -> FastAPI:
                     text.innerText = 'Veriler Eşitleniyor...';
                     btn.disabled = true;
                     btn.innerText = 'Eşitleniyor';
-                    
+
                     if (!syncPollInterval) {
                         syncPollInterval = setInterval(updateSyncStatusHeader, 3000);
                     }
@@ -2027,10 +2191,10 @@ def create_app(store: freefloat_archive.ArchiveStore | None = None) -> FastAPI:
                             loadSymbol(activeCode);
                         }
                     }
-                    
+
                     dot.style.animation = 'none';
                     dot.style.boxShadow = 'none';
-                    
+
                     if (state.last_status === 'error') {
                         dot.style.backgroundColor = 'var(--bearish)';
                         text.innerText = 'Hata: Eşitleme başarısız';
@@ -2038,7 +2202,7 @@ def create_app(store: freefloat_archive.ArchiveStore | None = None) -> FastAPI:
                         dot.style.backgroundColor = 'var(--bullish)';
                         text.innerText = data.last_report_date ? `Son Rapor: ${parseDateLabel(data.last_report_date)}` : 'Veriler Hazır';
                     }
-                    
+
                     if (data.cooldown_active) {
                         btn.disabled = true;
                         btn.innerText = `Eşitle (${data.cooldown_seconds_left}s)`;
@@ -2066,7 +2230,7 @@ def create_app(store: freefloat_archive.ArchiveStore | None = None) -> FastAPI:
             const btn = document.getElementById('syncNowBtn');
             btn.disabled = true;
             btn.innerText = 'İsteniyor...';
-            
+
             try {
                 const response = await fetch('/api/sync/run', { method: 'POST' });
                 if (!response.ok) {
@@ -2086,6 +2250,232 @@ def create_app(store: freefloat_archive.ArchiveStore | None = None) -> FastAPI:
                 alert("Eşitleme başlatılırken bağlantı hatası oluştu.");
                 updateSyncStatusHeader();
             }
+        }
+
+        function switchMainTab(tabName) {
+            document.getElementById('tabDashboard').classList.toggle('active-tab', tabName === 'dashboard');
+            document.getElementById('tabAlerts').classList.toggle('active-tab', tabName === 'alerts');
+            document.getElementById('tabSettings').classList.toggle('active-tab', tabName === 'settings');
+
+            document.getElementById('dashboardView').style.display = (tabName === 'dashboard') ? 'block' : 'none';
+            document.getElementById('alertsHistoryView').style.display = (tabName === 'alerts') ? 'flex' : 'none';
+            document.getElementById('settingsView').style.display = (tabName === 'settings') ? 'flex' : 'none';
+
+            if (tabName === 'alerts') {
+                fetchAlertsHistory();
+            } else if (tabName === 'settings') {
+                fetchSettings();
+            }
+        }
+
+        function fetchSettings() {
+            fetch('/api/settings')
+                .then(r => {
+                    if (!r.ok) throw new Error("Failed to load settings");
+                    return r.json();
+                })
+                .then(data => {
+                    document.getElementById('settingTelegramToken').value = data.telegram_token || '';
+                    document.getElementById('settingTelegramChatId').value = data.telegram_chat_id || '';
+                    document.getElementById('settingWebhookUrl').value = data.webhook_url || '';
+                    document.getElementById('settingLowFloat').value = data.low_float_threshold;
+                    document.getElementById('settingSevereLowFloat').value = data.severe_low_float_threshold;
+                    document.getElementById('settingRatioJump').value = data.ratio_jump_threshold;
+                })
+                .catch(err => {
+                    console.error(err);
+                    alert("Ayarlar yüklenemedi: " + err.message);
+                });
+        }
+
+        function saveSettings(event) {
+            if (event) event.preventDefault();
+
+            const payload = {
+                telegram_token: document.getElementById('settingTelegramToken').value,
+                telegram_chat_id: document.getElementById('settingTelegramChatId').value,
+                webhook_url: document.getElementById('settingWebhookUrl').value,
+                low_float_threshold: parseFloat(document.getElementById('settingLowFloat').value) || 20.0,
+                severe_low_float_threshold: parseFloat(document.getElementById('settingSevereLowFloat').value) || 10.0,
+                ratio_jump_threshold: parseFloat(document.getElementById('settingRatioJump').value) || 5.0
+            };
+
+            fetch('/api/settings/update', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            })
+                .then(r => r.json())
+                .then(res => {
+                    if (res.status === 'success') {
+                        alert("Ayarlar başarıyla kaydedildi.");
+                        fetchSettings();
+                    } else {
+                        alert("Hata: " + res.message);
+                    }
+                })
+                .catch(err => {
+                    console.error(err);
+                    alert("Ayarlar kaydedilirken hata oluştu: " + err.message);
+                });
+        }
+
+        function testAlertSettings() {
+            const payload = {
+                telegram_token: document.getElementById('settingTelegramToken').value,
+                telegram_chat_id: document.getElementById('settingTelegramChatId').value,
+                webhook_url: document.getElementById('settingWebhookUrl').value
+            };
+
+            fetch('/api/settings/test', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            })
+                .then(r => r.json())
+                .then(res => {
+                    if (res.status === 'success') {
+                        alert("Test bildirimi başarıyla gönderildi.");
+                    } else {
+                        alert("Test Başarısız: " + res.message);
+                    }
+                })
+                .catch(err => {
+                    console.error(err);
+                    alert("Test sırasında hata oluştu: " + err.message);
+                });
+        }
+
+        function fetchAlertsHistory() {
+            const symbol = document.getElementById('alertFilterSymbol').value;
+            const severity = document.getElementById('alertFilterSeverity').value;
+            const eventType = document.getElementById('alertFilterEventType').value;
+
+            let url = `/api/alerts/history?limit=100`;
+            if (symbol) url += `&symbol=${encodeURIComponent(symbol)}`;
+            if (severity) url += `&severity=${encodeURIComponent(severity)}`;
+            if (eventType) url += `&event_type=${encodeURIComponent(eventType)}`;
+
+            const tbody = document.getElementById('alertsHistoryBody');
+            tbody.innerHTML = '<tr><td colspan="7" style="text-align: center; color: var(--text-secondary); padding: 2rem;">Yükleniyor...</td></tr>';
+
+            fetch(url)
+                .then(r => r.ok ? r.json() : [])
+                .then(alerts => {
+                    if (alerts.length === 0) {
+                        tbody.innerHTML = '<tr><td colspan="7" style="text-align: center; color: var(--text-secondary); padding: 2rem;">Filtrelere uygun alarm bulunamadı.</td></tr>';
+                        return;
+                    }
+
+                    tbody.innerHTML = '';
+                    alerts.forEach(alert => {
+                        const tr = document.createElement('tr');
+
+                        const dateCell = document.createElement('td');
+                        dateCell.innerText = alert.report_date;
+                        tr.appendChild(dateCell);
+
+                        const symbolCell = document.createElement('td');
+                        symbolCell.innerHTML = `<span class="clickable-code" onclick="switchMainTab('dashboard'); loadSymbol('${alert.code}')">${alert.code}</span>`;
+                        tr.appendChild(symbolCell);
+
+                        const typeCell = document.createElement('td');
+                        typeCell.innerText = mapEventType(alert.event_type);
+                        tr.appendChild(typeCell);
+
+                        const descCell = document.createElement('td');
+                        descCell.innerHTML = formatEventDescription(alert.event_type, alert.metric_value, alert.payload);
+                        tr.appendChild(descCell);
+
+                        const valCell = document.createElement('td');
+                        valCell.innerText = formatMetricValue(alert.event_type, alert.metric_value);
+                        tr.appendChild(valCell);
+
+                        const sevCell = document.createElement('td');
+                        sevCell.innerHTML = formatSeverityBadge(alert.severity);
+                        tr.appendChild(sevCell);
+
+                        const statusCell = document.createElement('td');
+                        statusCell.innerHTML = formatStatusBadge(alert.status);
+                        tr.appendChild(statusCell);
+
+                        tbody.appendChild(tr);
+                    });
+                })
+                .catch(err => {
+                    console.error(err);
+                    tbody.innerHTML = '<tr><td colspan="7" style="text-align: center; color: var(--bearish); padding: 2rem;">Alarmlar yüklenirken hata oluştu.</td></tr>';
+                });
+        }
+
+        function mapEventType(type) {
+            const mapping = {
+                'liquidity_risk_low_float': 'Düşük Dolaşım Oranı',
+                'new_52w_high_ratio': '52 Haftalık Zirve',
+                'new_52w_low_ratio': '52 Haftalık Dip',
+                'ratio_jump_up': 'Sert Dolaşım Artışı',
+                'ratio_jump_down': 'Sert Dolaşım Düşüşü',
+                'ratio_threshold_cross_down': 'Kritik Eşik Altı',
+                'ratio_threshold_cross_up': 'Eşik Üstü Güvenli',
+                'float_shares_jump_up': 'Fiili Hisse Artışı',
+                'float_shares_jump_down': 'Fiili Hisse Azalışı',
+                'capital_change_detected': 'Sermaye Değişimi',
+                'test_alert': 'Test Bağlantısı'
+            };
+            return mapping[type] || type;
+        }
+
+        function formatEventDescription(type, val, payload) {
+            if (type === 'liquidity_risk_low_float') {
+                return `Dolaşım oranı kritik seviye altında.`;
+            } else if (type === 'new_52w_high_ratio') {
+                return `Dolaşım oranı son 1 yıllık zirveye ulaştı.`;
+            } else if (type === 'new_52w_low_ratio') {
+                return `Dolaşım oranı son 1 yıllık dibe ulaştı.`;
+            } else if (type === 'ratio_jump_up') {
+                return `Dolaşım oranı hızlıca yükseldi.`;
+            } else if (type === 'ratio_jump_down') {
+                return `Dolaşım oranı sert bir düşüş yaşadı.`;
+            } else if (type === 'ratio_threshold_cross_down') {
+                return `Oran %${(payload.from || 0).toFixed(2)} -> %${(payload.to || 0).toFixed(2)} düşüşle kritik sınırı aşağı kırdı.`;
+            } else if (type === 'ratio_threshold_cross_up') {
+                return `Oran %${(payload.from || 0).toFixed(2)} -> %${(payload.to || 0).toFixed(2)} yükselişle eşik üstüne çıktı.`;
+            } else if (type === 'float_shares_jump_up') {
+                return `Dolaşımdaki pay adedi arttı.`;
+            } else if (type === 'float_shares_jump_down') {
+                return `Dolaşımdaki pay adedi azaldı.`;
+            } else if (type === 'capital_change_detected') {
+                return `Ödenmiş sermaye değiştirildi: ${(payload.from || 0).toLocaleString()} -> ${(payload.to || 0).toLocaleString()} TRY`;
+            }
+            return payload.message || '';
+        }
+
+        function formatMetricValue(type, val) {
+            if (type === 'capital_change_detected') {
+                return '';
+            }
+            if (type === 'float_shares_jump_up' || type === 'float_shares_jump_down') {
+                return (val > 0 ? '+' : '') + val.toFixed(2) + '%';
+            }
+            return (val > 0 ? '+' : '') + val.toFixed(2) + '%';
+        }
+
+        function formatSeverityBadge(severity) {
+            if (severity === 'high') {
+                return '<span class="badge badge-high">Yüksek</span>';
+            } else if (severity === 'medium') {
+                return '<span class="badge badge-medium">Orta</span>';
+            }
+            return '<span class="badge" style="background-color: rgba(0, 176, 255, 0.15); color: #00b0ff; border: 1px solid rgba(0, 176, 255, 0.3);">Bilgi</span>';
+        }
+
+        function formatStatusBadge(status) {
+            if (status === 'sent' || status === 'success') {
+                return '<span class="badge" style="background-color: rgba(38, 166, 154, 0.15); color: var(--bullish); border: 1px solid rgba(38, 166, 154, 0.3);">Gönderildi</span>';
+            } else if (status === 'failed') {
+                return '<span class="badge" style="background-color: rgba(239, 83, 80, 0.15); color: var(--bearish); border: 1px solid rgba(239, 83, 80, 0.3);">Hata</span>';
+            }
+            return `<span class="badge" style="background-color: rgba(255, 255, 255, 0.1); color: var(--text-secondary); border: 1px solid rgba(255, 255, 255, 0.2);">${status}</span>`;
         }
 
         // Initialize status polling
@@ -2506,6 +2896,181 @@ def create_app(store: freefloat_archive.ArchiveStore | None = None) -> FastAPI:
                     status_code=status.HTTP_404_NOT_FOUND,
                     detail=str(e),
                 ) from e
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=str(e),
+            ) from e
+
+    import json
+
+    @app.get("/api/settings")
+    async def get_settings() -> Any:
+        try:
+            from ..config import load_config, resolve_setting
+            cfg = load_config()
+            token = resolve_setting("alerts", "telegram-token", cfg, "")
+            chat_id = resolve_setting("alerts", "telegram-chat-id", cfg, "")
+            webhook_url = resolve_setting("alerts", "webhook-url", cfg, "")
+            low_float = resolve_setting("alerts", "low-float-threshold", cfg, 20.0)
+            severe_low_float = resolve_setting("alerts", "severe-low-float-threshold", cfg, 10.0)
+            ratio_jump = resolve_setting("alerts", "ratio-jump-threshold", cfg, 5.0)
+
+            masked_token = ""
+            if token:
+                if len(token) > 8:
+                    masked_token = f"{token[:4]}****************{token[-4:]}"
+                else:
+                    masked_token = "****************"
+
+            return {
+                "telegram_token": masked_token,
+                "telegram_chat_id": chat_id,
+                "webhook_url": webhook_url,
+                "low_float_threshold": low_float,
+                "severe_low_float_threshold": severe_low_float,
+                "ratio_jump_threshold": ratio_jump,
+            }
+        except Exception as e:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=str(e),
+            ) from e
+
+    @app.post("/api/settings/update")
+    async def update_settings(payload: SettingsUpdate) -> Any:
+        try:
+            from ..config import load_config, save_config, resolve_setting
+            cfg = load_config()
+
+            if "alerts" not in cfg:
+                cfg["alerts"] = {}
+
+            token = payload.telegram_token
+            if token and "*" in token:
+                token = resolve_setting("alerts", "telegram-token", cfg, "")
+
+            cfg["alerts"]["telegram-token"] = token or ""
+            cfg["alerts"]["telegram-chat-id"] = payload.telegram_chat_id or ""
+            cfg["alerts"]["webhook-url"] = payload.webhook_url or ""
+            cfg["alerts"]["low-float-threshold"] = payload.low_float_threshold
+            cfg["alerts"]["severe-low-float-threshold"] = payload.severe_low_float_threshold
+            cfg["alerts"]["ratio-jump-threshold"] = payload.ratio_jump_threshold
+
+            save_config(cfg)
+            return {"status": "success", "message": "Settings updated successfully."}
+        except Exception as e:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=str(e),
+            ) from e
+
+    @app.post("/api/settings/test")
+    async def test_settings(payload: SettingsTest) -> Any:
+        import httpx
+        from ..config import load_config, resolve_setting
+        errors = []
+        success = False
+
+        token = payload.telegram_token
+        if token and "*" in token:
+            cfg = load_config()
+            token = resolve_setting("alerts", "telegram-token", cfg, "")
+
+        chat_id = payload.telegram_chat_id
+        webhook_url = payload.webhook_url
+
+        if token and chat_id:
+            try:
+                url = f"https://api.telegram.org/bot{token}/sendMessage"
+                text = "⚡ <b>tvcli Test Alarmı:</b> Telegram bildirim kanalı bağlantısı başarıyla doğrulandı! ✅"
+                res = httpx.post(url, json={"chat_id": chat_id, "text": text, "parse_mode": "HTML"}, timeout=5.0)
+                if res.status_code != 200:
+                    errors.append(f"Telegram API returned status {res.status_code}: {res.text}")
+                else:
+                    success = True
+            except Exception as e:
+                errors.append(f"Telegram connection error: {str(e)}")
+
+        if webhook_url:
+            try:
+                test_payload = {
+                    "report_date": "TEST_DATE",
+                    "events": [
+                        {
+                            "code": "TEST",
+                            "event_type": "test_alert",
+                            "severity": "info",
+                            "metric_value": 0.0,
+                            "threshold_value": 0.0,
+                            "payload": {"message": "tvcli Test Alarmı: Webhook bağlantısı başarıyla doğrulandı! ✅"}
+                        }
+                    ]
+                }
+                res = httpx.post(webhook_url, json=test_payload, timeout=5.0)
+                if res.status_code not in (200, 201, 204):
+                    errors.append(f"Webhook returned status {res.status_code}: {res.text}")
+                else:
+                    success = True
+            except Exception as e:
+                errors.append(f"Webhook connection error: {str(e)}")
+
+        if not token and not chat_id and not webhook_url:
+            return {"status": "error", "message": "No alert channel configured to test."}
+
+        if errors:
+            return {"status": "error", "message": "; ".join(errors)}
+
+        return {"status": "success", "message": "Test notification sent successfully."}
+
+    @app.get("/api/alerts/history")
+    async def get_alerts_history(
+        symbol: str | None = None,
+        severity: str | None = None,
+        status_filter: str | None = None,
+        event_type: str | None = None,
+        limit: int = 100,
+    ) -> Any:
+        try:
+            query = """
+                SELECT id, report_date, code, event_type, severity, metric_value, threshold_value, payload_json, status
+                FROM freefloat_events
+                WHERE 1=1
+            """
+            params = []
+            if symbol:
+                query += " AND code = ?"
+                params.append(symbol.upper())
+            if severity and severity != "all":
+                query += " AND severity = ?"
+                params.append(severity.lower())
+            if status_filter and status_filter != "all":
+                query += " AND status = ?"
+                params.append(status_filter.lower())
+            if event_type and event_type != "all":
+                query += " AND event_type = ?"
+                params.append(event_type)
+
+            query += " ORDER BY report_date DESC, id DESC LIMIT ?"
+            params.append(limit)
+
+            with store._connect() as conn:
+                rows = conn.execute(query, params).fetchall()
+
+            results = []
+            for row in rows:
+                results.append({
+                    "id": row["id"],
+                    "report_date": row["report_date"],
+                    "code": row["code"],
+                    "event_type": row["event_type"],
+                    "severity": row["severity"],
+                    "metric_value": row["metric_value"],
+                    "threshold_value": row["threshold_value"],
+                    "payload": json.loads(row["payload_json"]),
+                    "status": row["status"] if row["status"] is not None else "sent",
+                })
+            return results
+        except Exception as e:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail=str(e),

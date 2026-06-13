@@ -90,3 +90,37 @@ def resolve_setting(
     if not isinstance(current, dict):
         return default
     return current.get(key, default)
+
+
+def save_config(config: dict[str, Any], path: Path | None = None) -> None:
+    config_path = path or default_config_path()
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+
+    lines = []
+    # Write top-level keys first
+    for k, v in sorted(config.items()):
+        if not isinstance(v, dict):
+            lines.append(f"{k} = {_toml_value(v)}")
+
+    # Write tables
+    for section_name, section in sorted(config.items()):
+        if isinstance(section, dict):
+            if lines:
+                lines.append("")
+            lines.append(f"[{section_name}]")
+            for k, v in sorted(section.items()):
+                lines.append(f"{k} = {_toml_value(v)}")
+
+    content = "\n".join(lines) + "\n"
+    config_path.write_text(content, encoding="utf-8")
+
+
+def _toml_value(val: Any) -> str:
+    if isinstance(val, bool):
+        return "true" if val else "false"
+    if isinstance(val, (int, float)):
+        return str(val)
+    if isinstance(val, str):
+        escaped = val.replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n")
+        return f'"{escaped}"'
+    return f'"{val}"'

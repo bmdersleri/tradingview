@@ -49,3 +49,29 @@ def test_resolve_setting_prefers_environment(monkeypatch) -> None:
     monkeypatch.setenv(env_key("auth", "token"), "secret")
 
     assert resolve_setting("auth", "token", {"auth": {"token": "fallback"}}) == "secret"
+
+
+def test_save_config(tmp_path: Path) -> None:
+    from tvcli.config import save_config
+
+    config_path = tmp_path / "config.toml"
+    cfg = {
+        "debug": True,
+        "alerts": {
+            "telegram-token": "123:abc",
+            "telegram-chat-id": "456",
+            "webhook-url": "http://localhost/hook",
+            "low-float-threshold": 20.0,
+            "severe-low-float-threshold": 10.0,
+        },
+    }
+
+    save_config(cfg, config_path)
+    loaded = load_config(config_path)
+
+    assert loaded["debug"] is True
+    assert loaded["alerts"]["telegram-token"] == "123:abc"
+    assert loaded["alerts"]["telegram-chat-id"] == "456"
+    assert loaded["alerts"]["webhook-url"] == "http://localhost/hook"
+    assert loaded["alerts"]["low-float-threshold"] == 20.0
+    assert loaded["alerts"]["severe-low-float-threshold"] == 10.0
