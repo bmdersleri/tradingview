@@ -14,7 +14,9 @@ from tvcli.layers.freefloat_archive import ArchiveStore
 _PNG_MAGIC = b"\x89PNG\r\n\x1a\n"
 
 
-def _seed_store(store: ArchiveStore, codes: list[str], ratio_base: float = 35.0) -> None:
+def _seed_store(
+    store: ArchiveStore, codes: list[str], ratio_base: float = 35.0
+) -> None:
     for i, code in enumerate(codes):
         store.sync_records(
             (

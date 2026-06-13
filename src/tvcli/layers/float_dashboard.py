@@ -51,6 +51,19 @@ def _load_pyplot() -> Any:
     return plt
 
 
+def _apply_theme_to_axis(
+    ax: Any, bg: str, fg: str, grid: str, axis: str = "both"
+) -> None:
+    ax.set_facecolor(bg)
+    ax.tick_params(colors=fg, labelsize=7)
+    for spine in ["top", "right"]:
+        ax.spines[spine].set_visible(False)
+    for spine in ["left", "bottom"]:
+        ax.spines[spine].set_edgecolor(grid)
+        ax.spines[spine].set_linewidth(0.8)
+    ax.grid(True, color=grid, linestyle=":", linewidth=0.5, alpha=0.4, axis=axis)
+
+
 def _render_deep_dive(
     request: DashboardRequest,
     store: freefloat_archive.ArchiveStore,
@@ -73,6 +86,16 @@ def _render_deep_dive(
     ]
     n = len(dates)
     xs = list(range(n))
+
+    # Calculate 20-period Simple Moving Average (SMA)
+    sma_ratios = []
+    for idx in range(n):
+        if idx >= 19:
+            window = ratios[idx - 19 : idx + 1]
+            sma_ratios.append(sum(window) / 20.0)
+        else:
+            window = ratios[0 : idx + 1]
+            sma_ratios.append(sum(window) / len(window))
 
     # Tick positions
     max_ticks = 8
@@ -107,8 +130,24 @@ def _render_deep_dive(
 
     # ── Panel 1: ratio history ───────────────────────────────────────────────
     ax1 = axes[0]
-    ax1.set_facecolor(bg)
-    ax1.plot(xs, ratios, color=_BULL if not risk["low_float"] else _BEAR, linewidth=1.5)
+    line_color = _BULL if not risk["low_float"] else _BEAR
+    ax1.plot(
+        xs,
+        ratios,
+        color=line_color,
+        linewidth=2.0,
+        marker="o",
+        markersize=3,
+        markeredgewidth=0,
+    )
+    ax1.fill_between(xs, ratios, color=line_color, alpha=0.15)
+
+    # Plot SMA-20 overlay
+    if n > 1:
+        ax1.plot(
+            xs, sma_ratios, color=_WARN_YELLOW, linestyle="--", linewidth=1.0, alpha=0.8
+        )
+
     ax1.axhline(
         _LOW_FLOAT_LINE, color=_WARN_YELLOW, linewidth=0.8, linestyle="--", alpha=0.7
     )
@@ -122,31 +161,24 @@ def _render_deep_dive(
     }
     for i, d in enumerate(dates):
         if d in event_dates:
-            ax1.axvline(i, color=_WARN_YELLOW, linewidth=0.7, alpha=0.5)
-            ax1.plot(i, ratios[i], marker="D", color=_WARN_YELLOW, markersize=4)
+            ax1.axvline(i, color=_WARN_YELLOW, linestyle=":", linewidth=0.8, alpha=0.6)
+            ax1.plot(i, ratios[i], marker="o", color=_WARN_YELLOW, markersize=5)
 
     ax1.set_ylabel("ratio %", color=fg, fontsize=8)
-    ax1.tick_params(colors=fg, labelsize=7, bottom=False, labelbottom=False)
+    _apply_theme_to_axis(ax1, bg, fg, grid)
     ax1.set_xticks([])
-    ax1.yaxis.set_tick_params(labelsize=7)
-    for spine in ax1.spines.values():
-        spine.set_edgecolor(grid)
-    ax1.grid(True, color=grid, linewidth=0.5)
+    ax1.tick_params(bottom=False, labelbottom=False)
 
     # ── Panel 2: float shares ────────────────────────────────────────────────
     ax2 = axes[1]
-    ax2.set_facecolor(bg)
     ax2.bar(xs, shares, color=_BULL, alpha=0.6, width=0.8)
     ax2.set_ylabel("shares", color=fg, fontsize=8)
-    ax2.tick_params(colors=fg, labelsize=7, bottom=False, labelbottom=False)
+    _apply_theme_to_axis(ax2, bg, fg, grid, axis="y")
     ax2.set_xticks([])
-    for spine in ax2.spines.values():
-        spine.set_edgecolor(grid)
-    ax2.grid(True, color=grid, linewidth=0.5, axis="y")
+    ax2.tick_params(bottom=False, labelbottom=False)
 
     # ── Panel 3: ratio delta ─────────────────────────────────────────────────
     ax3 = axes[2]
-    ax3.set_facecolor(bg)
     colors_d = [_BULL if v >= 0 else _BEAR for v in deltas]
     ax3.bar(xs, deltas, color=colors_d, alpha=0.8, width=0.8)
     ax3.axhline(0, color=fg, linewidth=0.5)
@@ -155,10 +187,7 @@ def _render_deep_dive(
     ax3.set_ylabel("Δratio", color=fg, fontsize=8)
     ax3.set_xticks(tick_pos)
     ax3.set_xticklabels(tick_lbl, rotation=30, ha="right", color=fg, fontsize=6)
-    ax3.tick_params(colors=fg, labelsize=6)
-    for spine in ax3.spines.values():
-        spine.set_edgecolor(grid)
-    ax3.grid(True, color=grid, linewidth=0.5, axis="y")
+    _apply_theme_to_axis(ax3, bg, fg, grid, axis="y")
 
     request.out.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(str(request.out), dpi=100, facecolor=bg, bbox_inches="tight")
@@ -234,21 +263,20 @@ def _render_market_overview(
     event_types = [str(r["event_type"]) for r in event_rows]
     event_counts = [int(r["cnt"]) for r in event_rows]
 
-    # Layout: 3 panels (histogram, leaderboard, events strip)
-    n_event_rows = max(1, len(event_types))
-    fig, axes = plt.subplots(
-        3,
-        1,
-        figsize=(request.width / 100, request.height / 100),
-        facecolor=bg,
-        gridspec_kw={"height_ratios": [3, 3, max(1, n_event_rows)], "hspace": 0.35},
+    # Grid Layout: Left Column (Histogram), Right Column (Leaderboard & Events)
+    fig = plt.figure(figsize=(request.width / 100, request.height / 100), facecolor=bg)
+    gs = fig.add_gridspec(
+        2, 2, width_ratios=[3, 2], height_ratios=[1, 1], hspace=0.3, wspace=0.25
     )
+
+    ax1 = fig.add_subplot(gs[:, 0])  # Histogram
+    ax2 = fig.add_subplot(gs[0, 1])  # Leaderboard
+    ax3 = fig.add_subplot(gs[1, 1])  # Events
+
     title = f"BIST Free-Float Overview — {latest_date} ({n_symbols} symbols)"
     fig.suptitle(title, color=fg, fontsize=11, x=0.01, ha="left")
 
     # ── Panel 1: ratio distribution histogram ───────────────────────────────
-    ax1 = axes[0]
-    ax1.set_facecolor(bg)
     ax1.hist(all_ratios, bins=40, color=_BULL, alpha=0.7, edgecolor=bg)
     ax1.axvline(median_ratio, color=_WARN_YELLOW, linewidth=1.2, linestyle="--")
     ax1.text(
@@ -260,20 +288,15 @@ def _render_market_overview(
     )
     ax1.set_xlabel("free-float ratio %", color=fg, fontsize=8)
     ax1.set_ylabel("symbols", color=fg, fontsize=8)
-    ax1.tick_params(colors=fg, labelsize=7)
-    for spine in ax1.spines.values():
-        spine.set_edgecolor(grid)
-    ax1.grid(True, color=grid, linewidth=0.5, axis="y")
+    _apply_theme_to_axis(ax1, bg, fg, grid, axis="y")
 
     # ── Panel 2: lowest-float leaderboard (horizontal bars) ─────────────────
-    ax2 = axes[1]
-    ax2.set_facecolor(bg)
     ys = list(range(top_n))
     bar_colors = [
         _BEAR if r < _SEVERE_LINE else (_WARN_YELLOW if r < _LOW_FLOAT_LINE else _BULL)
         for r in top_ratios
     ]
-    ax2.barh(ys, top_ratios, color=bar_colors, alpha=0.8)
+    container = ax2.barh(ys, top_ratios, color=bar_colors, alpha=0.8)
     ax2.set_yticks(ys)
     ax2.set_yticklabels(top_codes, fontsize=7, color=fg)
     ax2.invert_yaxis()
@@ -281,20 +304,18 @@ def _render_market_overview(
     ax2.set_title(
         f"Lowest float (top {top_n})", color=fg, fontsize=9, loc="left", pad=4
     )
-    ax2.tick_params(colors=fg, labelsize=7)
-    for spine in ax2.spines.values():
-        spine.set_edgecolor(grid)
-    ax2.grid(True, color=grid, linewidth=0.5, axis="x")
+    _apply_theme_to_axis(ax2, bg, fg, grid, axis="x")
+    ax2.bar_label(container, fmt="%.2f%%", padding=3, color=fg, fontsize=6)
 
     # ── Panel 3: high-severity event counts ─────────────────────────────────
-    ax3 = axes[2]
-    ax3.set_facecolor(bg)
     if event_types:
         eys = list(range(len(event_types)))
-        ax3.barh(eys, event_counts, color=_WARN_YELLOW, alpha=0.8)
+        container_event = ax3.barh(eys, event_counts, color=_WARN_YELLOW, alpha=0.8)
         ax3.set_yticks(eys)
         ax3.set_yticklabels(event_types, fontsize=7, color=fg)
         ax3.invert_yaxis()
+        _apply_theme_to_axis(ax3, bg, fg, grid, axis="x")
+        ax3.bar_label(container_event, fmt="%d", padding=3, color=fg, fontsize=6)
     else:
         ax3.text(
             0.5,
@@ -307,13 +328,11 @@ def _render_market_overview(
         )
         ax3.set_xticks([])
         ax3.set_yticks([])
+        _apply_theme_to_axis(ax3, bg, fg, grid)
+
     ax3.set_title(
         "High-severity events (latest report)", color=fg, fontsize=9, loc="left", pad=4
     )
-    ax3.tick_params(colors=fg, labelsize=7)
-    for spine in ax3.spines.values():
-        spine.set_edgecolor(grid)
-    ax3.grid(True, color=grid, linewidth=0.5, axis="x")
 
     request.out.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(str(request.out), dpi=100, facecolor=bg, bbox_inches="tight")
