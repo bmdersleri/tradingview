@@ -368,6 +368,46 @@ def test_sync_archive_enforces_cooldown(monkeypatch, tmp_path: Path) -> None:
     assert second["synced_reports"] == 1
 
 
+def test_missing_business_days_skips_weekends_and_known_empty(
+    tmp_path: Path,
+) -> None:
+    store = ArchiveStore(tmp_path / "archive.sqlite3")
+
+    # Seed two report dates in a Mon–Fri week (2026-06-08 to 2026-06-12)
+    # Mon=2026-06-08, Tue=2026-06-09, Wed=2026-06-10, Thu=2026-06-11, Fri=2026-06-12
+    store.sync_records(
+        (_record("THYAO", 35.0, label="08.06.2026", float_shares=350.0),)
+    )  # stored for Mon 2026-06-08
+    # Mark Tue 2026-06-09 as known-empty
+    with store._connect() as conn:  # noqa: SLF001
+        conn.execute(
+            "INSERT OR IGNORE INTO freefloat_missing"
+            " (report_date, checked_at) VALUES (?,?)",
+            ("2026-06-09", datetime.now(UTC).isoformat()),
+        )
+
+    gaps = store.missing_business_days(date(2026, 6, 8), date(2026, 6, 14))
+
+    # Sat 2026-06-13, Sun 2026-06-14 excluded (weekends)
+    # Mon 2026-06-08 has stored report — not a gap
+    # Tue 2026-06-09 is known-empty — not a gap
+    # Wed 2026-06-10, Thu 2026-06-11, Fri 2026-06-12 — true gaps
+    assert date(2026, 6, 13) not in gaps  # Saturday
+    assert date(2026, 6, 14) not in gaps  # Sunday
+    assert date(2026, 6, 8) not in gaps  # stored
+    assert date(2026, 6, 9) not in gaps  # known-empty
+    assert sorted(gaps) == [date(2026, 6, 10), date(2026, 6, 11), date(2026, 6, 12)]
+
+
+def test_missing_business_days_all_covered(tmp_path: Path) -> None:
+    store = ArchiveStore(tmp_path / "archive.sqlite3")
+    store.sync_records(
+        (_record("THYAO", 35.0, label="10.06.2026", float_shares=350.0),)
+    )
+    gaps = store.missing_business_days(date(2026, 6, 10), date(2026, 6, 10))
+    assert gaps == []
+
+
 def test_archive_stats_exposes_sync_state(monkeypatch, tmp_path: Path) -> None:
     current = [datetime(2026, 6, 12, 9, 0, tzinfo=UTC)]
     store = ArchiveStore(tmp_path / "archive.sqlite3", clock=lambda: current[0])

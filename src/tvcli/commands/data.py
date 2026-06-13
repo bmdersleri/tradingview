@@ -295,3 +295,70 @@ def float_stats(
         json_mode=json_mode,
         handler=lambda: freefloat_archive.ArchiveStore().archive_stats(),
     )
+
+
+@app.command("float-verify")
+def float_verify(
+    ctx: typer.Context,
+    since: Annotated[str, typer.Option("--since", help="Start date YYYY-MM-DD")] = "",
+    until: Annotated[str, typer.Option("--until", help="End date YYYY-MM-DD")] = "",
+    json_mode: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    """Report archive coverage and gap dates for a date range.
+
+    Identifies business days in [since, until] that have neither an archived
+    report nor a known-empty stamp (i.e. were never attempted). All reads are
+    local — no network traffic.
+    """
+    json_mode = resolve_json_mode(ctx, json_mode)
+
+    def handler() -> dict[str, Any]:
+        if not since or not until:
+            raise UsageError("--since and --until are both required (YYYY-MM-DD).")
+        try:
+            d_since = date.fromisoformat(since)
+            d_until = date.fromisoformat(until)
+        except ValueError as exc:
+            raise UsageError(f"Invalid date format: {exc}") from exc
+        if d_since > d_until:
+            raise UsageError("--since must be <= --until.")
+
+        store = freefloat_archive.ArchiveStore()
+        # Count all business days in range.
+        total_biz = sum(
+            1
+            for ord_ in range(d_since.toordinal(), d_until.toordinal() + 1)
+            if date.fromordinal(ord_).weekday() < 5
+        )
+        # Count stored reports in range.
+        with store._connect() as conn:  # noqa: SLF001
+            stored_row = conn.execute(
+                "SELECT COUNT(DISTINCT report_date) AS n FROM freefloat_reports "
+                "WHERE report_date BETWEEN ? AND ?",
+                (d_since.isoformat(), d_until.isoformat()),
+            ).fetchone()
+            empty_row = conn.execute(
+                "SELECT COUNT(*) AS n FROM freefloat_missing "
+                "WHERE report_date BETWEEN ? AND ?",
+                (d_since.isoformat(), d_until.isoformat()),
+            ).fetchone()
+        stored = int(stored_row["n"]) if stored_row else 0
+        known_empty = int(empty_row["n"]) if empty_row else 0
+
+        gaps = store.missing_business_days(d_since, d_until)
+        coverage_pct = (
+            round(100.0 * (stored + known_empty) / total_biz, 2) if total_biz else None
+        )
+
+        return {
+            "since": since,
+            "until": until,
+            "business_days": total_biz,
+            "stored": stored,
+            "known_empty": known_empty,
+            "gaps": [str(g) for g in gaps],
+            "gap_count": len(gaps),
+            "coverage_pct": coverage_pct,
+        }
+
+    run_command("data.float.verify", json_mode=json_mode, handler=handler)

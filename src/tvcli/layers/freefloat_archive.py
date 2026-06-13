@@ -862,6 +862,23 @@ class ArchiveStore:
             "percentile": round(100.0 * at_or_below / total, 2) if total else None,
         }
 
+    def missing_business_days(self, since: date, until: date) -> list[date]:
+        """Business days in [since, until] not covered by the archive.
+
+        A day is covered if it has a stored report OR a known-empty stamp.
+        Weekends are skipped. Only true gaps (never attempted) are returned.
+        """
+        gaps: list[date] = []
+        current = since
+        while current <= until:
+            if current.weekday() < 5:  # Mon–Fri
+                if not self.has_report_date(current) and not self.is_known_empty(
+                    current
+                ):
+                    gaps.append(current)
+            current = date.fromordinal(current.toordinal() + 1)
+        return gaps
+
     def build_symbol_report(self, symbol: str, *, limit: int = 20) -> dict[str, Any]:
         code = freefloat.normalize_code(symbol)
         with self._connect() as conn:
