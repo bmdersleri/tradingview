@@ -10,6 +10,7 @@
 - [x] FastAPI Arayüz Yanıtlarında GZip Sıkıştırması (`GZipMiddleware`)
 - [x] Yapılandırılmış JSON Formatında stderr Günlükleme (Structured JSON Logging)
 - [x] `justfile` Geliştirici Kısayolları (`reset-db`, `serve-dev`, `test-fast`)
+- [x] WebSocket ile Gerçek Zamanlı Dashboard Eşitleme Entegrasyonu
 
 ## Yapılacak Görevler
 - [x] Geliştirici Test Verisi Seeding Komutu (`tvcli dev seed-db`) eklenmesi
