@@ -11,7 +11,8 @@ from fastapi.responses import HTMLResponse
 
 from ..layers import freefloat_archive
 from ..logging_utils import setup_logger
-from .routers import alerts, images, market, settings, symbol
+from .dependencies import ConnectionManager
+from .routers import alerts, images, market, settings, symbol, ws
 
 logger = setup_logger("tvcli.floatdash")
 
@@ -26,6 +27,7 @@ def create_app(store: freefloat_archive.ArchiveStore | None = None) -> FastAPI:
         store = freefloat_archive.ArchiveStore()
 
     app.state.store = store
+    app.state.ws_manager = ConnectionManager()
 
     # Reset any sync tasks that were left in "running" state because of server restart
     try:
@@ -47,6 +49,7 @@ def create_app(store: freefloat_archive.ArchiveStore | None = None) -> FastAPI:
     app.include_router(market.router)
     app.include_router(symbol.router)
     app.include_router(images.router)
+    app.include_router(ws.router)
 
     @app.get("/", response_class=HTMLResponse)
     async def get_dashboard_page() -> str:

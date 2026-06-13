@@ -2132,10 +2132,10 @@
         }
 
         // ----------------------------------------------------
-        // SYSTEM SYNC / STATUS ENGINE
+        // SYSTEM SYNC / STATUS ENGINE (WebSocket Enabled)
         // ----------------------------------------------------
         let isSyncing = false;
-        let syncPollInterval = null;
+        let ws = null;
 
         async function updateSyncStatusHeader() {
             try {
@@ -2149,6 +2149,8 @@
 
                 const state = data.sync_state;
 
+                const previouslySyncing = isSyncing;
+
                 if (state.last_status === 'running') {
                     isSyncing = true;
                     dot.style.backgroundColor = 'var(--warning)';
@@ -2157,17 +2159,14 @@
                     text.innerText = 'Veriler Eşitleniyor...';
                     btn.disabled = true;
                     btn.innerText = 'Eşitleniyor';
-
-                    if (!syncPollInterval) {
-                        syncPollInterval = setInterval(updateSyncStatusHeader, 3000);
-                    }
                 } else {
                     isSyncing = false;
-                    if (syncPollInterval) {
-                        clearInterval(syncPollInterval);
-                        syncPollInterval = null;
+
+                    // If we were previously syncing and now we are not, reload the data
+                    if (previouslySyncing) {
                         if (activeCode === 'MARKET') {
                             location.reload();
+                            return;
                         } else {
                             loadSymbol(activeCode);
                         }
@@ -2176,7 +2175,7 @@
                     dot.style.animation = 'none';
                     dot.style.boxShadow = 'none';
 
-                    if (state.last_status === 'error') {
+                    if (state.last_status === 'failed' || state.last_status === 'error') {
                         dot.style.backgroundColor = 'var(--bearish)';
                         text.innerText = 'Hata: Eşitleme başarısız';
                     } else {
@@ -2195,6 +2194,40 @@
             } catch (err) {
                 console.error("Failed to fetch sync status:", err);
             }
+        }
+
+        function connectWebSocket() {
+            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const wsUrl = `${protocol}//${window.location.host}/ws/sync`;
+            console.log("Connecting to WebSocket:", wsUrl);
+            ws = new WebSocket(wsUrl);
+
+            ws.onmessage = function(event) {
+                try {
+                    const data = JSON.parse(event.data);
+                    console.log("WebSocket event received:", data);
+                    if (data.event === 'sync_started') {
+                        updateSyncStatusHeader();
+                    } else if (data.event === 'sync_completed') {
+                        updateSyncStatusHeader();
+                    } else if (data.event === 'sync_failed') {
+                        updateSyncStatusHeader();
+                        alert(`Eşitleme hatası: ${data.error || 'Bilinmeyen hata'}`);
+                    }
+                } catch (e) {
+                    console.error("Error parsing WebSocket message:", e);
+                }
+            };
+
+            ws.onclose = function() {
+                console.log("WebSocket disconnected. Reconnecting in 3s...");
+                setTimeout(connectWebSocket, 3000);
+            };
+
+            ws.onerror = function(err) {
+                console.error("WebSocket error:", err);
+                ws.close();
+            };
         }
 
         function parseDateLabel(isoDate) {
@@ -2486,9 +2519,9 @@
             return `<span class="badge" style="background-color: rgba(255, 255, 255, 0.1); color: var(--text-secondary); border: 1px solid rgba(255, 255, 255, 0.2);">${status}</span>`;
         }
 
-        // Initialize status polling
+        // Initialize status and WebSocket connection
         updateSyncStatusHeader();
-        setInterval(updateSyncStatusHeader, 15000);
+        connectWebSocket();
     </script>
 </body>
 </html>

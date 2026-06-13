@@ -5,11 +5,12 @@ import statistics
 from datetime import UTC, datetime
 from typing import Any
 
+import anyio
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 
 from ...layers.freefloat_archive import ArchiveStore
 from ...logging_utils import setup_logger
-from ..dependencies import get_store
+from ..dependencies import ConnectionManager, get_store, get_ws_manager
 
 logger = setup_logger("tvcli.floatdash.market")
 
@@ -240,11 +241,13 @@ async def get_api_sync_status(store: ArchiveStore = Depends(get_store)) -> Any:
         ) from e
 
 
-def _bg_sync(store: ArchiveStore) -> None:
+def _bg_sync(store: ArchiveStore, ws_manager: ConnectionManager) -> None:
     try:
         from ...layers import freefloat_archive
 
         logger.info("Background VAP free-float sync thread started")
+        anyio.from_thread.run(ws_manager.broadcast, {"event": "sync_started"})
+
         freefloat_archive.sync_archive(
             latest=True,
             since=None,
@@ -254,13 +257,20 @@ def _bg_sync(store: ArchiveStore) -> None:
             store=store,
         )
         logger.info("Background VAP free-float sync thread completed")
-    except Exception:
+        anyio.from_thread.run(ws_manager.broadcast, {"event": "sync_completed"})
+    except Exception as e:
         logger.exception("Background VAP free-float sync thread failed")
+        anyio.from_thread.run(
+            ws_manager.broadcast,
+            {"event": "sync_failed", "error": str(e)},
+        )
 
 
 @router.post("/api/sync/run")
 async def run_api_sync(
-    background_tasks: BackgroundTasks, store: ArchiveStore = Depends(get_store)
+    background_tasks: BackgroundTasks,
+    store: ArchiveStore = Depends(get_store),
+    ws_manager: ConnectionManager = Depends(get_ws_manager),
 ) -> Any:
     try:
         logger.info("Starting VAP free-float sync via API")
@@ -285,7 +295,7 @@ async def run_api_sync(
                         "cooldown_seconds_left": seconds_left,
                     }
 
-        background_tasks.add_task(_bg_sync, store)
+        background_tasks.add_task(_bg_sync, store, ws_manager)
         logger.info("Sync task queued successfully in background")
         return {"success": True, "message": "Sync started in background."}
     except Exception as e:

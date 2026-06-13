@@ -121,3 +121,14 @@ def test_floatdash_app_empty_store(tmp_path: Path) -> None:
     assert resp_market_api.status_code == 404
     assert resp_market_img.status_code == 404
     assert resp_symbol_img.status_code == 404
+
+
+def test_floatdash_websocket(tmp_path: Path) -> None:
+    from fastapi.testclient import TestClient
+
+    store = ArchiveStore(tmp_path / "archive.sqlite3")
+    app = create_app(store=store)
+    client = TestClient(app)
+    with client.websocket_connect("/ws/sync"):
+        # Just connecting and disconnecting should be successful
+        pass
