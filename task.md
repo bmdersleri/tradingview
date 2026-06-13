@@ -13,7 +13,7 @@
 
 ## Yapılacak Görevler
 - [x] Geliştirici Test Verisi Seeding Komutu (`tvcli dev seed-db`) eklenmesi
-- [ ] Arayüz üzerinden İnteraktif İndikatör Kontrolleri (SMA, EMA, WMA, RSI, MACD)
+- [x] Arayüz üzerinden İnteraktif İndikatör Kontrolleri (SMA, EMA, WMA, RSI, MACD)
 - [ ] Arayüz üzerinden Alarm Eşikleri ve Telegram Ayarları Paneli (Settings UI)
 - [ ] Kronolojik Alarm Geçmişi ve Günlüğü Tablosu (Alert History)
 - [ ] KAP Duyuruları Entegrasyonu ve Grafik Üzerinde Duyuru İkonları (KAP News)
