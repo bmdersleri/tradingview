@@ -365,6 +365,15 @@ def test_market_router_additional_coverage(monkeypatch, tmp_path: Path) -> None:
             assert len(data_m["top_losers"]) > 0
             assert data_m["top_losers"][0]["code"] == "GARAN"
 
+            # Assert new summary keys
+            assert "prev_median_ratio" in data_m["summary"]
+            assert "prev_severe_risk_count" in data_m["summary"]
+            assert "prev_warning_risk_count" in data_m["summary"]
+            assert "prev_total_high_alerts" in data_m["summary"]
+            assert "prev_total_symbols" in data_m["summary"]
+            assert data_m["summary"]["prev_median_ratio"] is not None
+            assert data_m["summary"]["prev_total_symbols"] is not None
+
             # B. GET /api/market raises exception
             def mock_stats_raise(*args, **kwargs):
                 raise ValueError("Stats crash")

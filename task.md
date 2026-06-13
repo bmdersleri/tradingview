@@ -19,7 +19,7 @@
 - [x] Alert Thresholds and Telegram Settings Panel in UI (Settings UI)
 - [x] Chronological Alert History and Audit Log Table (Alert History)
 - [x] KAP Public Disclosures Integration and timeline markers on charts (KAP News)
-- [ ] Sector Details and Comparison Page (Sector Analysis)
+- [x] Sector Details and Comparison Page (Sector Analysis)
 
 ## Active Development Details
 - **FastAPI Server Port**: 8789

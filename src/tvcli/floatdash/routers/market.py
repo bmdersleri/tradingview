@@ -82,6 +82,48 @@ async def get_api_market(store: ArchiveStore = Depends(get_store)) -> Any:
             ).fetchone()
             previous_date = prev_date_row["report_date"] if prev_date_row else None
 
+            prev_median_ratio = None
+            prev_severe_risk_count = None
+            prev_warning_risk_count = None
+            prev_total_high_alerts = None
+            prev_total_symbols = None
+
+            if previous_date:
+                prev_rows = conn.execute(
+                    "SELECT ratio FROM freefloat_snapshots WHERE report_date = ?",
+                    (previous_date,),
+                ).fetchall()
+                prev_ratios = [float(r["ratio"]) for r in prev_rows]
+                if prev_ratios:
+                    prev_median_ratio = round(statistics.median(prev_ratios), 2)
+                    prev_total_symbols = len(prev_ratios)
+
+                prev_severe_risk_row = conn.execute(
+                    "SELECT COUNT(*) AS cnt FROM freefloat_snapshots WHERE report_date = ? AND ratio < 10.0",
+                    (previous_date,),
+                ).fetchone()
+                prev_severe_risk_count = (
+                    int(prev_severe_risk_row["cnt"]) if prev_severe_risk_row else 0
+                )
+
+                prev_warning_risk_row = conn.execute(
+                    "SELECT COUNT(*) AS cnt FROM freefloat_snapshots WHERE report_date = ? AND ratio >= 10.0 AND ratio < 20.0",
+                    (previous_date,),
+                ).fetchone()
+                prev_warning_risk_count = (
+                    int(prev_warning_risk_row["cnt"]) if prev_warning_risk_row else 0
+                )
+
+                prev_total_high_alerts_row = conn.execute(
+                    "SELECT COUNT(*) AS cnt FROM freefloat_events WHERE report_date = ? AND severity = 'high'",
+                    (previous_date,),
+                ).fetchone()
+                prev_total_high_alerts = (
+                    int(prev_total_high_alerts_row["cnt"])
+                    if prev_total_high_alerts_row
+                    else 0
+                )
+
             top_gainers = []
             top_losers = []
             if previous_date:
@@ -173,6 +215,11 @@ async def get_api_market(store: ArchiveStore = Depends(get_store)) -> Any:
                 "severe_risk_count": severe_risk_count,
                 "warning_risk_count": warning_risk_count,
                 "total_high_alerts": total_high_alerts,
+                "prev_median_ratio": prev_median_ratio,
+                "prev_severe_risk_count": prev_severe_risk_count,
+                "prev_warning_risk_count": prev_warning_risk_count,
+                "prev_total_high_alerts": prev_total_high_alerts,
+                "prev_total_symbols": prev_total_symbols,
             },
             "top_gainers": top_gainers,
             "top_losers": top_losers,

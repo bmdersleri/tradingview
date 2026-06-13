@@ -23,6 +23,10 @@
             --bullish: #26a69a;
             --bearish: #ef5350;
             --warning: #f57c00;
+            --accent-purple: #9c27b0;
+            --accent-amber: #ffaa00;
+            --accent-blue: #00b0ff;
+            --info: #00b0ff;
         }
 
         * {
@@ -457,6 +461,153 @@
             background-color: rgba(255, 255, 255, 0.05) !important;
             color: var(--text-primary) !important;
         }
+
+        .market-info-bar {
+            display: grid;
+            grid-template-columns: repeat(5, 1fr);
+            gap: 1rem;
+        }
+
+        .chart-pane {
+            background-color: rgba(24, 28, 39, 0.4);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 1rem;
+            position: relative;
+        }
+
+        .chart-canvas-container {
+            position: relative;
+            width: 100%;
+            height: calc(100% - 24px);
+        }
+
+        .toolbar-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 1rem;
+            background-color: rgba(24, 28, 39, 0.4);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 0.5rem 1rem;
+            font-size: 0.85rem;
+        }
+
+        .toolbar-group {
+            display: flex;
+            gap: 1rem;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+
+        .flex-row {
+            display: flex;
+            gap: 0.5rem;
+            align-items: center;
+        }
+
+        .info-delta {
+            font-size: 0.8rem;
+            color: var(--text-secondary);
+            margin-top: 0.2rem;
+            display: flex;
+            align-items: center;
+            gap: 0.25rem;
+        }
+
+        .chart-empty-state {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: var(--text-secondary);
+            font-size: 0.95rem;
+            font-weight: 500;
+        }
+
+        @keyframes shimmer {
+            0% { background-position: -200% 0; }
+            100% { background-position: 200% 0; }
+        }
+
+        .skeleton {
+            display: inline-block;
+            height: 1.25rem;
+            width: 70px;
+            background: linear-gradient(90deg, rgba(255, 255, 255, 0.05) 25%, rgba(255, 255, 255, 0.15) 50%, rgba(255, 255, 255, 0.05) 75%);
+            background-size: 200% 100%;
+            animation: shimmer 1.5s infinite linear;
+            border-radius: 4px;
+            vertical-align: middle;
+        }
+
+        [role="button"]:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible {
+            outline: 2px solid var(--accent-color);
+            outline-offset: 2px;
+        }
+
+        @media (max-width: 1100px) {
+            .market-info-bar {
+                grid-template-columns: repeat(2, 1fr) !important;
+            }
+            .info-bar {
+                grid-template-columns: repeat(2, 1fr) !important;
+            }
+            #marketChartsContainer {
+                grid-template-columns: 1fr !important;
+                height: auto !important;
+            }
+            #marketChartsContainer > div {
+                height: 350px !important;
+            }
+        }
+
+        @media (max-width: 768px) {
+            .main-container {
+                flex-direction: column !important;
+                height: auto !important;
+                overflow: auto !important;
+            }
+            .sidebar {
+                width: 100% !important;
+                height: auto !important;
+                max-height: 250px !important;
+                border-right: none !important;
+                border-bottom: 1px solid var(--border-color) !important;
+            }
+            .leaderboard-list {
+                display: flex !important;
+                flex-direction: row !important;
+                overflow-x: auto !important;
+                padding: 0.5rem !important;
+                gap: 0.5rem !important;
+            }
+            .leaderboard-item {
+                flex: 0 0 160px !important;
+                padding: 0.5rem !important;
+                border-bottom: none !important;
+                border-right: 1px solid rgba(42, 46, 57, 0.2) !important;
+            }
+            .content-area {
+                width: 100% !important;
+                overflow-y: visible !important;
+            }
+        }
+
+        @media (prefers-reduced-motion: reduce) {
+            .spinner, .skeleton {
+                animation: none !important;
+            }
+            .skeleton {
+                background: rgba(255, 255, 255, 0.1) !important;
+            }
+        }
     </style>
 </head>
 <body>
@@ -467,21 +618,21 @@
         </div>
         <div id="syncStatusHeader" style="display: flex; align-items: center; gap: 0.6rem; font-size: 0.8rem; background-color: rgba(24, 28, 39, 0.6); border: 1px solid var(--border-color); padding: 0.35rem 0.75rem; border-radius: 6px; margin-left: 2rem; margin-right: 0;">
             <span id="syncStatusDot" style="width: 8px; height: 8px; border-radius: 50%; background-color: var(--bullish); display: inline-block;"></span>
-            <span id="syncStatusText" style="color: var(--text-primary); font-weight: 500;">Veri Durumu Yükleniyor...</span>
-            <button id="syncNowBtn" onclick="triggerSync()" class="btn" style="padding: 0.15rem 0.5rem; font-size: 0.75rem; border-radius: 4px; line-height: 1; margin-left: 0.5rem;">Eşitle</button>
+            <span id="syncStatusText" aria-live="polite" style="color: var(--text-primary); font-weight: 500;">Veri Durumu Yükleniyor...</span>
+            <button id="syncNowBtn" type="button" onclick="triggerSync()" class="btn" style="padding: 0.15rem 0.5rem; font-size: 0.75rem; border-radius: 4px; line-height: 1; margin-left: 0.5rem;">Eşitle</button>
         </div>
-        <div class="tabs-container" style="display: flex; gap: 0.5rem; margin-right: auto; margin-left: 1.5rem;">
-            <button id="tabDashboard" class="btn active-tab" onclick="switchMainTab('dashboard')" style="padding: 0.35rem 0.75rem; font-size: 0.85rem; border-radius: 6px; font-weight: 600;">Dashboard</button>
-            <button id="tabAlerts" class="btn" onclick="switchMainTab('alerts')" style="padding: 0.35rem 0.75rem; font-size: 0.85rem; border-radius: 6px; font-weight: 600; background: none; border: 1px solid transparent;">Alarmlar</button>
-            <button id="tabSectors" class="btn" onclick="switchMainTab('sectors')" style="padding: 0.35rem 0.75rem; font-size: 0.85rem; border-radius: 6px; font-weight: 600; background: none; border: 1px solid transparent;">Sektörler</button>
-            <button id="tabSettings" class="btn" onclick="switchMainTab('settings')" style="padding: 0.35rem 0.75rem; font-size: 0.85rem; border-radius: 6px; font-weight: 600; background: none; border: 1px solid transparent;">Ayarlar</button>
+        <div class="tabs-container" role="tablist" style="display: flex; gap: 0.5rem; margin-right: auto; margin-left: 1.5rem;">
+            <button id="tabDashboard" type="button" role="tab" aria-selected="true" aria-controls="dashboardView" class="btn active-tab" onclick="switchMainTab('dashboard')" style="padding: 0.35rem 0.75rem; font-size: 0.85rem; border-radius: 6px; font-weight: 600;">Dashboard</button>
+            <button id="tabAlerts" type="button" role="tab" aria-selected="false" aria-controls="alertsHistoryView" class="btn" onclick="switchMainTab('alerts')" style="padding: 0.35rem 0.75rem; font-size: 0.85rem; border-radius: 6px; font-weight: 600; background: none; border: 1px solid transparent;">Alarmlar</button>
+            <button id="tabSectors" type="button" role="tab" aria-selected="false" aria-controls="sectorsView" class="btn" onclick="switchMainTab('sectors')" style="padding: 0.35rem 0.75rem; font-size: 0.85rem; border-radius: 6px; font-weight: 600; background: none; border: 1px solid transparent;">Sektörler</button>
+            <button id="tabSettings" type="button" role="tab" aria-selected="false" aria-controls="settingsView" class="btn" onclick="switchMainTab('settings')" style="padding: 0.35rem 0.75rem; font-size: 0.85rem; border-radius: 6px; font-weight: 600; background: none; border: 1px solid transparent;">Ayarlar</button>
         </div>
         <div class="search-container">
             <div style="position: relative; display: flex; align-items: center;">
-                <input type="text" id="symbolSearch" class="search-input" placeholder="Search symbol or company..." />
-                <span id="searchClear" onclick="clearSearch()" style="position: absolute; right: 10px; cursor: pointer; color: var(--text-secondary); display: none; font-size: 1.1rem; user-select: none;">&times;</span>
+                <input type="text" id="symbolSearch" class="search-input" placeholder="Search symbol or company..." aria-label="Hisse ara" />
+                <span id="searchClear" onclick="clearSearch()" aria-label="Aramayı Temizle" style="position: absolute; right: 10px; cursor: pointer; color: var(--text-secondary); display: none; font-size: 1.1rem; user-select: none;">&times;</span>
             </div>
-            <button onclick="searchSymbol()" class="btn">Search</button>
+            <button type="button" onclick="searchSymbol()" class="btn">Search</button>
         </div>
     </header>
 
@@ -489,7 +640,7 @@
         <aside class="sidebar">
             <div class="sidebar-header">Symbols Leaderboard</div>
             <ul id="leaderboardList" class="leaderboard-list">
-                <li id="item-market" class="leaderboard-item active" onclick="loadMarketOverview()">
+                <li id="item-market" class="leaderboard-item active" onclick="loadMarketOverview()" role="button" tabindex="0" onkeydown="if(event.key==='Enter'||event.key===' '){loadMarketOverview();event.preventDefault();}">
                     <div>
                         <div class="item-code">Market Overview</div>
                         <div class="item-name">BIST General Stats</div>
@@ -502,49 +653,53 @@
         <main class="content-area">
             <div id="errorBox" class="error-box"></div>
 
-            <div id="dashboardView">
-                <div id="marketInfoBar" class="info-bar" style="display: grid; grid-template-columns: repeat(5, 1fr); gap: 1rem;">
-                <div class="info-card">
-                    <span class="info-label">Piyasa Medyan Oranı</span>
-                    <span id="marketMedianRatio" class="info-value">-</span>
+            <div id="dashboardView" role="tabpanel" aria-labelledby="tabDashboard">
+                <div id="marketInfoBar" class="market-info-bar">
+                    <div class="info-card">
+                        <span class="info-label">Piyasa Medyan Oranı</span>
+                        <span id="marketMedianRatio" class="info-value"><span class="skeleton"></span></span>
+                        <span id="marketMedianRatioDelta" class="info-delta"></span>
+                    </div>
+                    <div class="info-card">
+                        <span class="info-label">Takip Edilen Hisse</span>
+                        <span id="marketTotalSymbols" class="info-value"><span class="skeleton"></span></span>
+                        <span id="marketTotalSymbolsDelta" class="info-delta"></span>
+                    </div>
+                    <div class="info-card">
+                        <span class="info-label" style="color: var(--bearish);">Risk Oranı Kritik (&lt;10%)</span>
+                        <span id="marketSevereRisk" class="info-value" style="color: var(--bearish);"><span class="skeleton"></span></span>
+                        <span id="marketSevereRiskDelta" class="info-delta"></span>
+                    </div>
+                    <div class="info-card">
+                        <span class="info-label" style="color: var(--warning);">Aktif Kritik Alarmlar</span>
+                        <span id="marketHighAlerts" class="info-value" style="color: var(--warning);"><span class="skeleton"></span></span>
+                        <span id="marketHighAlertsDelta" class="info-delta"></span>
+                    </div>
+                    <div class="info-card" onclick="showDataHealthDetails()" role="button" tabindex="0" onkeydown="if(event.key==='Enter'||event.key===' '){showDataHealthDetails();event.preventDefault();}" style="cursor: pointer; position: relative; border-color: rgba(38, 166, 154, 0.4);">
+                        <span class="info-label" style="color: var(--bullish);">Veri Sağlığı (Son 30g)</span>
+                        <span id="dataHealthPct" class="info-value" style="color: var(--bullish);"><span class="skeleton"></span></span>
+                        <span style="font-size: 0.65rem; color: var(--text-secondary); display: block; margin-top: 0.2rem;">Detaylar için tıklayın</span>
+                    </div>
                 </div>
-                <div class="info-card">
-                    <span class="info-label">Takip Edilen Hisse</span>
-                    <span id="marketTotalSymbols" class="info-value">-</span>
-                </div>
-                <div class="info-card">
-                    <span class="info-label" style="color: var(--bearish);">Risk Oranı Kritik (&lt;10%)</span>
-                    <span id="marketSevereRisk" class="info-value" style="color: var(--bearish);">-</span>
-                </div>
-                <div class="info-card">
-                    <span class="info-label" style="color: var(--warning);">Aktif Kritik Alarmlar</span>
-                    <span id="marketHighAlerts" class="info-value" style="color: var(--warning);">-</span>
-                </div>
-                <div class="info-card" onclick="showDataHealthDetails()" style="cursor: pointer; position: relative; border-color: rgba(38, 166, 154, 0.4);">
-                    <span class="info-label" style="color: var(--bullish);">Veri Sağlığı (Son 30g)</span>
-                    <span id="dataHealthPct" class="info-value" style="color: var(--bullish);">-</span>
-                    <span style="font-size: 0.65rem; color: var(--text-secondary); display: block; margin-top: 0.2rem;">Detaylar için tıklayın</span>
-                </div>
-            </div>
 
-            <div id="infoBar" class="info-bar" style="display: none;">
-                <div class="info-card">
-                    <span class="info-label">Symbol / Name</span>
-                    <span id="infoSymbol" class="info-value">-</span>
+                <div id="infoBar" class="info-bar" style="display: none;">
+                    <div class="info-card">
+                        <span class="info-label">Symbol / Name</span>
+                        <span id="infoSymbol" class="info-value"><span class="skeleton"></span></span>
+                    </div>
+                    <div class="info-card">
+                        <span class="info-label">Latest Float Ratio</span>
+                        <span id="infoRatio" class="info-value"><span class="skeleton"></span></span>
+                    </div>
+                    <div class="info-card">
+                        <span class="info-label">Risk Profile</span>
+                        <span id="infoRisk" class="info-value"><span class="skeleton"></span></span>
+                    </div>
+                    <div class="info-card">
+                        <span class="info-label">Percentile Rank</span>
+                        <span id="infoPercentile" class="info-value"><span class="skeleton"></span></span>
+                    </div>
                 </div>
-                <div class="info-card">
-                    <span class="info-label">Latest Float Ratio</span>
-                    <span id="infoRatio" class="info-value">-</span>
-                </div>
-                <div class="info-card">
-                    <span class="info-label">Risk Profile</span>
-                    <span id="infoRisk" class="info-value">-</span>
-                </div>
-                <div class="info-card">
-                    <span class="info-label">Percentile Rank</span>
-                    <span id="infoPercentile" class="info-value">-</span>
-                </div>
-            </div>
 
             <!-- Interactive Charts Container -->
             <div class="chart-card">
@@ -554,23 +709,23 @@
                 </div>
 
                 <!-- Market Charts Container -->
-                <div id="marketChartsContainer" style="display: grid; grid-template-columns: 3fr 2fr; gap: 1.5rem; width: 100%; height: 500px;">
-                    <div style="background-color: rgba(24, 28, 39, 0.4); border: 1px solid var(--border-color); border-radius: 8px; padding: 1rem; position: relative;">
+                <div id="marketChartsContainer" class="market-charts-container">
+                    <div class="chart-pane">
                         <span class="info-label" style="display: block; margin-bottom: 0.5rem;">Oran Dağılımı (Histogram)</span>
-                        <div style="position: relative; width: 100%; height: calc(100% - 24px);">
+                        <div class="chart-canvas-container">
                             <canvas id="histogramChart"></canvas>
                         </div>
                     </div>
                     <div style="display: grid; grid-template-rows: 1fr 1fr; gap: 1.5rem; height: 100%;">
-                        <div style="background-color: rgba(24, 28, 39, 0.4); border: 1px solid var(--border-color); border-radius: 8px; padding: 1rem; position: relative;">
+                        <div class="chart-pane">
                             <span class="info-label" style="display: block; margin-bottom: 0.5rem;">En Düşük Oranlı Hisseler</span>
-                            <div style="position: relative; width: 100%; height: calc(100% - 24px);">
+                            <div class="chart-canvas-container">
                                 <canvas id="leaderboardChart"></canvas>
                             </div>
                         </div>
-                        <div style="background-color: rgba(24, 28, 39, 0.4); border: 1px solid var(--border-color); border-radius: 8px; padding: 1rem; position: relative;">
+                        <div class="chart-pane">
                             <span class="info-label" style="display: block; margin-bottom: 0.5rem;">Aktif Kritik Alarmlar (Son Rapor)</span>
-                            <div style="position: relative; width: 100%; height: calc(100% - 24px);">
+                            <div class="chart-canvas-container">
                                 <canvas id="eventsChart"></canvas>
                             </div>
                         </div>
@@ -969,6 +1124,18 @@
                     </div>
                 </div>
 
+                <div class="card" style="margin-top: 1rem;">
+                    <h3 style="margin-bottom: 0.5rem; display: flex; align-items: center; gap: 0.5rem; color: var(--accent-color);">
+                        <span>📊</span> Sektör Karşılaştırma Analizi (Medyan vs Ortalama)
+                    </h3>
+                    <p style="font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 1.5rem;">
+                        Sektörler arası fiili dolaşım oranlarının karşılaştırması. Medyan ve Ortalama değerlerin farkı sektörel dağılımın homojenliğini gösterir.
+                    </p>
+                    <div style="position: relative; width: 100%; height: 350px;">
+                        <canvas id="sectorComparisonChart"></canvas>
+                    </div>
+                </div>
+
                 <!-- Sector Detail Table Card -->
                 <div id="sectorDetailCard" class="card" style="display: none; margin-top: 1rem;">
                     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; border-bottom: 1px solid var(--border-color); padding-bottom: 0.5rem;">
@@ -1091,6 +1258,7 @@
         let histogramChartInstance = null;
         let leaderboardChartInstance = null;
         let eventsChartInstance = null;
+        let sectorComparisonChartInstance = null;
 
         function parseDateToISO(dateStr) {
             if (!dateStr) return '';
@@ -1982,6 +2150,57 @@
                 document.getElementById('marketSevereRisk').innerText = data.summary ? data.summary.severe_risk_count : '-';
                 document.getElementById('marketHighAlerts').innerText = data.summary ? data.summary.total_high_alerts : '-';
 
+                // Helper to format deltas
+                function updateDelta(elementId, currentValue, prevValue, type = 'ratio') {
+                    const el = document.getElementById(elementId);
+                    if (!el) return;
+                    if (prevValue === undefined || prevValue === null) {
+                        el.innerHTML = '';
+                        return;
+                    }
+                    const diff = currentValue - prevValue;
+                    let formatted = '';
+                    let color = 'var(--text-secondary)';
+                    
+                    if (type === 'ratio') {
+                        formatted = (diff >= 0 ? '+' : '') + diff.toFixed(2) + '%';
+                        if (diff > 0) {
+                            color = 'var(--bullish)';
+                            formatted += ' ▲';
+                        } else if (diff < 0) {
+                            color = 'var(--bearish)';
+                            formatted += ' ▼';
+                        }
+                    } else if (type === 'count_pos') {
+                        formatted = (diff >= 0 ? '+' : '') + diff;
+                        if (diff > 0) {
+                            color = 'var(--bullish)';
+                            formatted += ' ▲';
+                        } else if (diff < 0) {
+                            color = 'var(--bearish)';
+                            formatted += ' ▼';
+                        }
+                    } else if (type === 'count_neg') {
+                        formatted = (diff >= 0 ? '+' : '') + diff;
+                        if (diff > 0) {
+                            color = 'var(--bearish)';
+                            formatted += ' ▲';
+                        } else if (diff < 0) {
+                            color = 'var(--bullish)';
+                            formatted += ' ▼';
+                        }
+                    }
+                    el.innerText = formatted;
+                    el.style.color = color;
+                }
+
+                if (data.summary) {
+                    updateDelta('marketMedianRatioDelta', data.median_ratio, data.summary.prev_median_ratio, 'ratio');
+                    updateDelta('marketTotalSymbolsDelta', data.n_symbols, data.summary.prev_total_symbols, 'count_pos');
+                    updateDelta('marketSevereRiskDelta', data.summary.severe_risk_count, data.summary.prev_severe_risk_count, 'count_neg');
+                    updateDelta('marketHighAlertsDelta', data.summary.total_high_alerts, data.summary.prev_total_high_alerts, 'count_neg');
+                }
+
                 // Populate Analyst Summary
                 const analystSummary = document.getElementById('marketAnalystSummary');
                 if (analystSummary) {
@@ -2757,10 +2976,81 @@
                     `;
                     grid.appendChild(card);
                 });
+
+                createSectorComparisonChart(data);
             } catch (err) {
                 console.error(err);
                 grid.innerHTML = `<div style="color: var(--bearish); padding: 2rem;">Hata: ${err.message}</div>`;
             }
+        }
+
+        function createSectorComparisonChart(sectors) {
+            if (sectorComparisonChartInstance) sectorComparisonChartInstance.destroy();
+
+            const labels = sectors.map(sec => sec.sector === 'Bilinmeyen' ? 'DİĞER' : sec.sector);
+            const medians = sectors.map(sec => sec.median_ratio);
+            const averages = sectors.map(sec => sec.avg_ratio);
+
+            const ctx = document.getElementById('sectorComparisonChart').getContext('2d');
+            sectorComparisonChartInstance = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: labels,
+                    datasets: [
+                        {
+                            label: 'Medyan Fiili Dolaşım (%)',
+                            data: medians,
+                            backgroundColor: 'rgba(38, 166, 154, 0.75)',
+                            borderColor: '#26a69a',
+                            borderWidth: 1,
+                            borderRadius: 4
+                        },
+                        {
+                            label: 'Ortalama Fiili Dolaşım (%)',
+                            data: averages,
+                            backgroundColor: 'rgba(0, 176, 255, 0.75)',
+                            borderColor: '#00b0ff',
+                            borderWidth: 1,
+                            borderRadius: 4
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            display: true,
+                            position: 'top',
+                            labels: {
+                                color: '#d1d4dc',
+                                font: { family: 'Outfit', size: 11 }
+                            }
+                        },
+                        tooltip: {
+                            backgroundColor: '#1e222d',
+                            titleColor: '#d1d4dc',
+                            bodyColor: '#d1d4dc',
+                            borderColor: 'rgba(42, 46, 57, 0.4)',
+                            borderWidth: 1,
+                        }
+                    },
+                    scales: {
+                        x: {
+                            grid: { color: 'rgba(42, 46, 57, 0.15)' },
+                            ticks: { color: '#787b86', font: { family: 'Outfit', size: 10 } }
+                        },
+                        y: {
+                            grid: { color: 'rgba(42, 46, 57, 0.15)' },
+                            ticks: {
+                                color: '#787b86',
+                                font: { family: 'Outfit', size: 10 },
+                                callback: function(value) { return value + '%'; }
+                            }
+                        }
+                    }
+                }
+            });
         }
 
         function getSectorColor(ratio) {
