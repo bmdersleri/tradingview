@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 from datetime import date, datetime
+from pathlib import Path
 from typing import Annotated, Any
 
 import typer
 
 from ..errors import NotFoundError, UsageError
+from ..layers import float_dashboard as _dashboard
 from ..layers import freefloat, freefloat_archive, screener
 from ._helpers import resolve_json_mode, run_command
 
@@ -362,3 +364,44 @@ def float_verify(
         }
 
     run_command("data.float.verify", json_mode=json_mode, handler=handler)
+
+
+@app.command("float-dashboard")
+def float_dashboard_cmd(
+    ctx: typer.Context,
+    symbol: Annotated[str | None, typer.Argument()] = None,
+    out: Annotated[Path, typer.Option("--out", help="Output PNG path")] = Path(
+        "float_dashboard.png"
+    ),
+    market: Annotated[bool, typer.Option("--market")] = False,
+    date_str: Annotated[str | None, typer.Option("--date")] = None,
+    limit: Annotated[int, typer.Option("--limit")] = 120,
+    top: Annotated[int, typer.Option("--top")] = 15,
+    theme: Annotated[str, typer.Option("--theme")] = "dark",
+    width: Annotated[int, typer.Option("--width")] = 1600,
+    height: Annotated[int, typer.Option("--height")] = 1000,
+    json_mode: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    """Render free-float dashboard PNG (deep-dive or market overview).
+
+    Pass a SYMBOL for a single-symbol 3-panel deep-dive, or --market for a
+    market-wide overview. All reads are local — no network traffic.
+    """
+    json_mode = resolve_json_mode(ctx, json_mode)
+    report_date = _parse_iso_date(date_str, option_name="--date")
+
+    def handler() -> dict[str, Any]:
+        req = _dashboard.DashboardRequest(
+            out=out,
+            symbol=symbol,
+            market=market,
+            report_date=report_date,
+            limit=limit,
+            top=top,
+            theme=theme,
+            width=width,
+            height=height,
+        )
+        return _dashboard.run_dashboard(req)
+
+    run_command("data.float.dashboard", json_mode=json_mode, handler=handler)
