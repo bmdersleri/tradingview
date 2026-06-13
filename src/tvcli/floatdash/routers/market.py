@@ -385,6 +385,8 @@ async def run_api_sync(
         background_tasks.add_task(_bg_sync, store, ws_manager, latest, since, until)
         logger.info("Sync task queued successfully in background")
         return {"success": True, "message": "Sync started in background."}
+    except HTTPException:
+        raise
     except Exception as e:
         logger.exception("Failed to start sync via API")
         raise HTTPException(

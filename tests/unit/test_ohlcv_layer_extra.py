@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 
 from tvcli.auth.session import SessionRecord
 from tvcli.layers.ohlcv import (
@@ -64,3 +65,17 @@ def test_fetch_history_success(monkeypatch, tmp_path: Path) -> None:
     assert bars[0].close == 312.5
     assert ws.closed is True
     assert build_ohlcv_payload(OhlcvRequest("BIST:THYAO", "1d", 1), bars)["count"] == 1
+
+
+def test_frame_text() -> None:
+    from tvcli.layers.ohlcv import _frame_text
+
+    assert _frame_text("hello") == "hello"
+
+    class FakeFrame:
+        def __init__(self, payload: Any) -> None:
+            self.payload = payload
+
+    assert _frame_text(FakeFrame(b"world")) == "world"
+    assert _frame_text(FakeFrame("demo")) == "demo"
+    assert _frame_text(123) == ""
