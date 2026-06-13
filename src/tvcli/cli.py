@@ -9,7 +9,7 @@ import typer
 
 from . import __version__
 from .cache import SQLiteTTLCache
-from .commands import auth, chart, data, mcp, ohlcv, serve, ta, ui
+from .commands import auth, chart, data, dev, mcp, ohlcv, serve, ta, ui
 from .config import default_cache_path, default_config_path
 from .doctor import run_doctor
 from .output import build_envelope, emit
@@ -24,6 +24,7 @@ app.add_typer(ui.app, name="ui")
 app.add_typer(auth.app, name="auth")
 app.add_typer(serve.app, name="serve")
 app.add_typer(mcp.app, name="mcp")
+app.add_typer(dev.app, name="dev")
 
 cache_app = typer.Typer(add_completion=False, help="Cache utilities")
 app.add_typer(cache_app, name="cache")
