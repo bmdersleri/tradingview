@@ -110,6 +110,53 @@
             border-color: var(--accent-color);
         }
 
+        /* Toast notification styling */
+        .toast-container {
+            position: fixed;
+            bottom: 2rem;
+            right: 2rem;
+            display: flex;
+            flex-direction: column;
+            gap: 0.75rem;
+            z-index: 10000;
+            pointer-events: none;
+        }
+
+        .toast-message {
+            background-color: #1e222d;
+            border: 1px solid var(--border-color);
+            color: var(--text-primary);
+            padding: 0.75rem 1.25rem;
+            border-radius: 6px;
+            font-size: 0.85rem;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            transform: translateY(20px);
+            opacity: 0;
+            transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+            pointer-events: auto;
+            max-width: 350px;
+        }
+
+        .toast-message.show {
+            transform: translateY(0);
+            opacity: 1;
+        }
+
+        .toast-message.success {
+            border-left: 4px solid var(--bullish);
+        }
+
+        .toast-message.error {
+            border-left: 4px solid var(--bearish);
+        }
+
+        .toast-message.info {
+            border-left: 4px solid var(--warning);
+        }
+
         .btn {
             background-color: var(--accent-color);
             color: #ffffff;
@@ -834,6 +881,11 @@
                                     <input type="text" id="settingTelegramChatId" placeholder="Örn: -100123456789" style="background-color: #1e222d; border: 1px solid var(--border-color); color: var(--text-primary); padding: 0.5rem; border-radius: 6px; outline: none; font-family: inherit; font-size: 0.9rem;" />
                                 </div>
                             </div>
+                            <div style="display: flex; justify-content: flex-end; margin-top: 0.75rem;">
+                                <button type="button" id="btnTestTelegram" onclick="testTelegramAlert()" class="btn" style="padding: 0.35rem 0.75rem; font-size: 0.8rem; background-color: transparent; border: 1px solid var(--border-color); color: var(--text-primary); display: flex; align-items: center; gap: 0.35rem; border-radius: 4px;">
+                                    <span>✉️</span> Telegram Bağlantısını Test Et
+                                </button>
+                            </div>
                         </div>
 
                         <!-- Webhook Settings Section -->
@@ -844,6 +896,11 @@
                             <div style="display: flex; flex-direction: column; gap: 0.4rem;">
                                 <label style="font-size: 0.8rem; color: var(--text-secondary); font-weight: 500;">Webhook URL:</label>
                                 <input type="url" id="settingWebhookUrl" placeholder="Örn: https://kendi-sunucunuz.com/api/hook" style="background-color: #1e222d; border: 1px solid var(--border-color); color: var(--text-primary); padding: 0.5rem; border-radius: 6px; outline: none; font-family: inherit; font-size: 0.9rem;" />
+                            </div>
+                            <div style="display: flex; justify-content: flex-end; margin-top: 0.75rem;">
+                                <button type="button" id="btnTestWebhook" onclick="testWebhookAlert()" class="btn" style="padding: 0.35rem 0.75rem; font-size: 0.8rem; background-color: transparent; border: 1px solid var(--border-color); color: var(--text-primary); display: flex; align-items: center; gap: 0.35rem; border-radius: 4px;">
+                                    <span>🔗</span> Webhook Bağlantısını Test Et
+                                </button>
                             </div>
                         </div>
 
@@ -870,8 +927,9 @@
 
                         <!-- Form Actions -->
                         <div style="display: flex; gap: 1rem; justify-content: flex-end; margin-top: 1rem;">
-                            <button type="button" onclick="testAlertSettings()" class="btn" style="background-color: transparent; border: 1px solid var(--border-color); color: var(--text-primary);">Bağlantıyı Test Et</button>
-                            <button type="submit" class="btn" style="background-color: var(--accent-color); border-color: var(--accent-hover); color: white;">Ayarları Kaydet</button>
+                            <button type="submit" class="btn" style="background-color: var(--accent-color); border-color: var(--accent-hover); color: white; display: flex; align-items: center; gap: 0.5rem;">
+                                <span>💾</span> Ayarları Kaydet
+                            </button>
                         </div>
                     </form>
                 </div>
@@ -2947,8 +3005,37 @@
                 })
                 .catch(err => {
                     console.error(err);
-                    alert("Ayarlar yüklenemedi: " + err.message);
+                    showToast("Ayarlar yüklenemedi: " + err.message, "error");
                 });
+        }
+
+        function showToast(message, type = 'success', duration = 4000) {
+            let container = document.getElementById('toastContainer');
+            if (!container) {
+                container = document.createElement('div');
+                container.id = 'toastContainer';
+                container.className = 'toast-container';
+                document.body.appendChild(container);
+            }
+
+            const toast = document.createElement('div');
+            toast.className = `toast-message ${type}`;
+            
+            let icon = 'ℹ️';
+            if (type === 'success') icon = '✅';
+            if (type === 'error') icon = '❌';
+            if (type === 'info') icon = '⚡';
+
+            toast.innerHTML = `<span style="font-size: 1.1rem;">${icon}</span> <div>${message}</div>`;
+            container.appendChild(toast);
+
+            // Trigger reflow/animation
+            setTimeout(() => toast.classList.add('show'), 10);
+
+            setTimeout(() => {
+                toast.classList.remove('show');
+                setTimeout(() => toast.remove(), 300);
+            }, duration);
         }
 
         function saveSettings(event) {
@@ -2971,23 +3058,35 @@
                 .then(r => r.json())
                 .then(res => {
                     if (res.status === 'success') {
-                        alert("Ayarlar başarıyla kaydedildi.");
+                        showToast("Ayarlar başarıyla kaydedildi.", "success");
                         fetchSettings();
                     } else {
-                        alert("Hata: " + res.message);
+                        showToast("Hata: " + res.message, "error");
                     }
                 })
                 .catch(err => {
                     console.error(err);
-                    alert("Ayarlar kaydedilirken hata oluştu: " + err.message);
+                    showToast("Ayarlar kaydedilirken hata oluştu: " + err.message, "error");
                 });
         }
 
-        function testAlertSettings() {
+        function testTelegramAlert() {
+            const token = document.getElementById('settingTelegramToken').value;
+            const chatId = document.getElementById('settingTelegramChatId').value;
+            
+            if (!token || !chatId) {
+                showToast("Telegram Token ve Chat ID alanları boş olamaz.", "error");
+                return;
+            }
+
+            const btn = document.getElementById('btnTestTelegram');
+            const originalText = btn.innerHTML;
+            btn.disabled = true;
+            btn.innerHTML = "<span>⏳</span> Test ediliyor...";
+
             const payload = {
-                telegram_token: document.getElementById('settingTelegramToken').value,
-                telegram_chat_id: document.getElementById('settingTelegramChatId').value,
-                webhook_url: document.getElementById('settingWebhookUrl').value
+                telegram_token: token,
+                telegram_chat_id: chatId
             };
 
             fetch('/api/settings/test', {
@@ -2998,14 +3097,58 @@
                 .then(r => r.json())
                 .then(res => {
                     if (res.status === 'success') {
-                        alert("Test bildirimi başarıyla gönderildi.");
+                        showToast("Telegram test mesajı başarıyla gönderildi!", "success");
                     } else {
-                        alert("Test Başarısız: " + res.message);
+                        showToast("Telegram Testi Başarısız: " + res.message, "error");
                     }
                 })
                 .catch(err => {
                     console.error(err);
-                    alert("Test sırasında hata oluştu: " + err.message);
+                    showToast("Test hatası: " + err.message, "error");
+                })
+                .finally(() => {
+                    btn.disabled = false;
+                    btn.innerHTML = originalText;
+                });
+        }
+
+        function testWebhookAlert() {
+            const url = document.getElementById('settingWebhookUrl').value;
+            
+            if (!url) {
+                showToast("Webhook URL alanı boş olamaz.", "error");
+                return;
+            }
+
+            const btn = document.getElementById('btnTestWebhook');
+            const originalText = btn.innerHTML;
+            btn.disabled = true;
+            btn.innerHTML = "<span>⏳</span> Test ediliyor...";
+
+            const payload = {
+                webhook_url: url
+            };
+
+            fetch('/api/settings/test', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            })
+                .then(r => r.json())
+                .then(res => {
+                    if (res.status === 'success') {
+                        showToast("Webhook test çağrısı başarıyla gönderildi!", "success");
+                    } else {
+                        showToast("Webhook Testi Başarısız: " + res.message, "error");
+                    }
+                })
+                .catch(err => {
+                    console.error(err);
+                    showToast("Test hatası: " + err.message, "error");
+                })
+                .finally(() => {
+                    btn.disabled = false;
+                    btn.innerHTML = originalText;
                 });
         }
 
@@ -3029,6 +3172,7 @@
 
             const statusText = document.getElementById('backupStatusText');
             if (statusText) statusText.innerText = "Yükleniyor ve geri yükleniyor...";
+            showToast("Yedek dosyası geri yükleniyor, lütfen bekleyin...", "info");
 
             const formData = new FormData();
             formData.append("file", file);
@@ -3041,16 +3185,16 @@
                 .then(res => {
                     if (statusText) statusText.innerText = "";
                     if (res.status === 'success') {
-                        alert("Veritabanı yedekten başarıyla geri yüklendi! Sayfa yenileniyor...");
-                        location.reload();
+                        showToast("Veritabanı yedekten başarıyla geri yüklendi! Sayfa yenileniyor...", "success");
+                        setTimeout(() => location.reload(), 2000);
                     } else {
-                        alert("Geri yükleme başarısız: " + res.message);
+                        showToast("Geri yükleme başarısız: " + res.message, "error");
                     }
                 })
                 .catch(err => {
                     if (statusText) statusText.innerText = "";
                     console.error(err);
-                    alert("Yükleme sırasında hata oluştu: " + err.message);
+                    showToast("Yükleme sırasında hata oluştu: " + err.message, "error");
                 })
                 .finally(() => {
                     event.target.value = '';
