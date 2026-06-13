@@ -56,6 +56,25 @@ def _risk_events_for(symbol: str) -> list[dict[str, Any]]:
         return []
 
 
+def _float_ratios_for(symbol: str, limit: int = 20) -> list[float]:
+    """Ordered (oldest→newest) free-float ratio history from the local archive.
+
+    Returns an empty list for non-BIST symbols or when the archive is unavailable.
+    Never touches the network — the archive is a local-only read.
+    """
+    if not freefloat.is_bist_symbol(symbol):
+        return []
+    from ..layers.freefloat_archive import ArchiveStore
+
+    try:
+        rows = ArchiveStore().symbol_history(
+            freefloat.normalize_code(symbol), limit=limit
+        )
+        return [float(row["ratio"]) for row in reversed(rows)]
+    except Exception:
+        return []
+
+
 def analyze_query(request: analyze.AnalyzeRequest) -> dict[str, Any]:
     payload = analyze.run_analysis(request)
     # When --auto produced a signal block, enrich it with VAP free-float the same
@@ -102,6 +121,7 @@ def signal_query(request: SignalRequest) -> dict[str, Any]:
     if free_float is not None:
         report = signals.apply_liquidity(report, free_float)
     report = signals.apply_event_risk(report, _risk_events_for(request.symbol))
+    report = signals.apply_float_trend(report, _float_ratios_for(request.symbol))
     payload = signals.signal_payload(report)
     payload.update(
         {"symbol": request.symbol, "interval": request.interval, "bars": len(bars)}

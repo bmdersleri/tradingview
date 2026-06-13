@@ -274,13 +274,85 @@ def vote_signals(closes: ind.FloatSeq) -> list[IndicatorVote]:
     ]
 
 
+# Minimum ratio observations needed for a meaningful free-float trend.
+_FLOAT_TREND_MIN = 3
+# Maximum window length (most-recent N observations) for the trend vote.
+_FLOAT_TREND_WINDOW = 20
+
+
+def vote_free_float_trend(ratios: Sequence[float]) -> IndicatorVote:
+    """Directional vote from free-float ratio trajectory (lagging context).
+
+    Computes net change across the supplied ratio history (oldest→newest).
+    Rising float → improving tradability (vote +1).
+    Falling float → tightening / lock-up risk (vote -1).
+    Insufficient data or flat → hold (vote 0, strength 0).
+
+    This is a low-weight context voice; it can shift a borderline hold but
+    should never dominate a strong price-derived signal.
+    """
+    window = list(ratios[-_FLOAT_TREND_WINDOW:])
+    if len(window) < _FLOAT_TREND_MIN:
+        return IndicatorVote(
+            "free_float_trend", 0, 0.0, "Insufficient free-float history."
+        )
+    mean = sum(window) / len(window) or 1.0
+    net_change = window[-1] - window[0]
+    # Strength proportional to % move relative to mean; capped at 1.
+    strength = min(1.0, abs(net_change) / mean)
+    if net_change > 0:
+        return IndicatorVote(
+            "free_float_trend",
+            1,
+            round(strength, 4),
+            f"Free-float ratio rising ({window[0]:.2f}% → {window[-1]:.2f}%): "
+            "improving tradability.",
+        )
+    if net_change < 0:
+        return IndicatorVote(
+            "free_float_trend",
+            -1,
+            round(strength, 4),
+            f"Free-float ratio falling ({window[0]:.2f}% → {window[-1]:.2f}%): "
+            "tightening float, lock-up risk.",
+        )
+    return IndicatorVote(
+        "free_float_trend", 0, 0.0, "Free-float ratio flat — no directional context."
+    )
+
+
 # Per-regime weights: trust trend-following indicators in trends, mean-reversion
-# ones in ranges, and nobody fully when volatile.
+# ones in ranges, and nobody fully when volatile. free_float_trend is a low-weight
+# lagging context voice — kept intentionally below the price-derived votes.
 _REGIME_WEIGHTS: dict[RegimeKind, dict[str, float]] = {
-    "trending_up": {"ma_cross": 1.0, "macd": 1.0, "rsi": 0.3, "bbands": 0.3},
-    "trending_down": {"ma_cross": 1.0, "macd": 1.0, "rsi": 0.3, "bbands": 0.3},
-    "ranging": {"ma_cross": 0.3, "macd": 0.3, "rsi": 1.0, "bbands": 1.0},
-    "volatile": {"ma_cross": 0.5, "macd": 0.5, "rsi": 0.5, "bbands": 0.5},
+    "trending_up": {
+        "ma_cross": 1.0,
+        "macd": 1.0,
+        "rsi": 0.3,
+        "bbands": 0.3,
+        "free_float_trend": 0.3,
+    },
+    "trending_down": {
+        "ma_cross": 1.0,
+        "macd": 1.0,
+        "rsi": 0.3,
+        "bbands": 0.3,
+        "free_float_trend": 0.3,
+    },
+    "ranging": {
+        "ma_cross": 0.3,
+        "macd": 0.3,
+        "rsi": 1.0,
+        "bbands": 1.0,
+        "free_float_trend": 0.4,
+    },
+    "volatile": {
+        "ma_cross": 0.5,
+        "macd": 0.5,
+        "rsi": 0.5,
+        "bbands": 0.5,
+        "free_float_trend": 0.3,
+    },
 }
 
 _SELECTED_SPECS: dict[RegimeKind, tuple[str, ...]] = {
@@ -412,6 +484,48 @@ def apply_event_risk(
         confidence=damp_for_events(report.confidence, adverse),
         risk_events=adverse,
         event_note=event_risk_note(adverse),
+    )
+
+
+def apply_float_trend(report: SignalReport, ratios: Sequence[float]) -> SignalReport:
+    """Append the free-float trend vote and re-derive score/label/confidence.
+
+    Unlike apply_liquidity / apply_event_risk (pure confidence damps), this is a
+    real voter — the trend vote enters the weighted consensus so it can shift a
+    borderline hold to buy/sell when the float trajectory agrees with price action.
+    The weight is low (0.3-0.4) so it never dominates a strong price-derived read.
+    """
+    from dataclasses import replace
+
+    trend_vote = vote_free_float_trend(ratios)
+    if trend_vote.vote == 0:
+        return report  # flat / insufficient — no change
+
+    new_votes = list(report.votes) + [trend_vote]
+    weights = _REGIME_WEIGHTS[report.regime.kind]
+
+    numerator = sum(
+        weights.get(v.indicator, 0.0) * v.vote * v.strength for v in new_votes
+    )
+    denominator = sum(weights.get(v.indicator, 0.0) for v in new_votes) or 1.0
+    new_score = numerator / denominator
+
+    if new_score > _SIGNAL_THRESHOLD:
+        new_label: SignalLabel = "buy"
+    elif new_score < -_SIGNAL_THRESHOLD:
+        new_label = "sell"
+    else:
+        new_label = "hold"
+
+    regime_clarity = report.regime.strength if report.regime.kind != "volatile" else 0.3
+    new_confidence = max(0.0, min(1.0, abs(new_score) * (0.5 + 0.5 * regime_clarity)))
+
+    return replace(
+        report,
+        votes=new_votes,
+        score=round(new_score, 4),
+        signal=new_label,
+        confidence=round(new_confidence, 4),
     )
 
 

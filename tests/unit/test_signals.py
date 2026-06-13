@@ -196,3 +196,58 @@ def test_votes_handle_short_series_without_crashing() -> None:
     report = s.analyze_signal([100.0, 101.0, 102.0, 101.5, 103.0])
     assert report.signal in {"buy", "sell", "hold"}
     assert len(report.votes) == 4
+
+
+def test_vote_free_float_trend_rising_is_buy() -> None:
+    ratios = [5.0 + i * 0.5 for i in range(10)]
+    vote = s.vote_free_float_trend(ratios)
+    assert vote.indicator == "free_float_trend"
+    assert vote.vote == 1
+    assert vote.strength > 0
+    assert "rising" in vote.reason.lower()
+
+
+def test_vote_free_float_trend_falling_is_sell() -> None:
+    ratios = [25.0 - i * 1.0 for i in range(10)]
+    vote = s.vote_free_float_trend(ratios)
+    assert vote.vote == -1
+    assert "falling" in vote.reason.lower()
+
+
+def test_vote_free_float_trend_flat_is_hold() -> None:
+    ratios = [12.5] * 10
+    vote = s.vote_free_float_trend(ratios)
+    assert vote.vote == 0
+    assert vote.strength == 0.0
+
+
+def test_vote_free_float_trend_insufficient_is_hold() -> None:
+    vote = s.vote_free_float_trend([10.0, 11.0])  # below _FLOAT_TREND_MIN=3
+    assert vote.vote == 0
+
+
+def test_apply_float_trend_appends_vote_and_can_shift_signal() -> None:
+    # Rising float vote appended; score moves in buy direction vs base.
+    base = s.analyze_signal(_ranging())
+    rising = [1.0 + i * 2.0 for i in range(20)]
+    enriched = s.apply_float_trend(base, rising)
+    assert any(v.indicator == "free_float_trend" for v in enriched.votes)
+    assert enriched.score >= base.score
+
+
+def test_apply_float_trend_noop_on_flat_ratios() -> None:
+    base = s.analyze_signal(_uptrend())
+    same = s.apply_float_trend(base, [20.0] * 10)
+    assert same is base  # flat => no change, same object returned
+
+
+def test_apply_float_trend_composes_with_liquidity_and_events() -> None:
+    base = s.analyze_signal(_uptrend())
+    after_liq = s.apply_liquidity(base, 12.0)
+    after_events = s.apply_event_risk(after_liq, [_high("float_shares_jump_down")])
+    rising = [1.0 + i for i in range(15)]
+    final = s.apply_float_trend(after_events, rising)
+    # free_float preserved from apply_liquidity; event_note preserved.
+    assert final.free_float == 12.0
+    assert final.event_note is not None
+    assert any(v.indicator == "free_float_trend" for v in final.votes)

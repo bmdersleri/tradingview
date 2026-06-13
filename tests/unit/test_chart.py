@@ -353,6 +353,58 @@ def test_signal_query_skips_free_float_for_non_bist(monkeypatch) -> None:
     assert payload["liquidity"]["free_float"] is None
 
 
+def test_signal_query_attaches_float_trend_vote(monkeypatch) -> None:
+    from tvcli.commands import chart as chart_cmd
+    from tvcli.layers import freefloat, ohlcv
+
+    bars = tuple(
+        ohlcv.OhlcvBar(
+            time=1_700_000_000 + i * 86_400,
+            open=100.0 + i,
+            high=101.0 + i,
+            low=99.0 + i,
+            close=100.0 + i,
+            volume=1000.0,
+        )
+        for i in range(260)
+    )
+    monkeypatch.setattr(
+        "tvcli.commands.chart.ohlcv.fetch_history", lambda request: bars
+    )
+    monkeypatch.setattr(
+        "tvcli.commands.chart.freefloat.lookup",
+        lambda code: freefloat.FloatRecord(
+            code="THYAO",
+            isin="X",
+            name="T",
+            float_shares=1.0,
+            capital=10.0,
+            ratio=40.0,
+            date="11.06.2026",
+        ),
+    )
+    # Return a rising float history so the trend vote is non-zero.
+    monkeypatch.setattr(
+        "tvcli.layers.freefloat_archive.ArchiveStore.latest_risk_events",
+        lambda self, symbol: [],
+    )
+    rising_history = [
+        {"ratio": 10.0 + i} for i in range(15)
+    ]  # oldest first in DB order
+    monkeypatch.setattr(
+        "tvcli.layers.freefloat_archive.ArchiveStore.symbol_history",
+        lambda self, code, limit: list(
+            reversed(rising_history)
+        ),  # DB returns newest-first
+    )
+
+    payload = chart_cmd.signal_query(
+        chart_cmd.SignalRequest(symbol="BIST:THYAO", interval="1d", bars=260)
+    )
+    votes = {v["indicator"] for v in payload["votes"]}
+    assert "free_float_trend" in votes
+
+
 def test_chart_shot_rejects_studies(monkeypatch, tmp_path: Path) -> None:
     # --studies is not supported on `shot`; it must fail fast (exit 2) before any
     # browser work and point the user at `chart analyze`.
