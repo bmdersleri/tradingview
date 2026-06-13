@@ -185,6 +185,49 @@ def test_lookup(monkeypatch, tmp_path: Path) -> None:
     assert missing is None
 
 
+def _point_archive_at(monkeypatch, tmp_path: Path):
+    """Redirect the archive's default DB path into tmp for isolation."""
+    db = tmp_path / "archive.sqlite3"
+    monkeypatch.setattr(
+        "tvcli.layers.freefloat_archive.default_archive_path", lambda: db
+    )
+    from tvcli.layers.freefloat_archive import ArchiveStore
+
+    return ArchiveStore(db)
+
+
+def test_lookup_prefers_archive(monkeypatch, tmp_path: Path) -> None:
+    # Seed the archive, then make any live download explode. A local-first lookup
+    # must read the archive and never touch the network.
+    store = _point_archive_at(monkeypatch, tmp_path)
+    store.sync_records(ff._parse_xlsx(_make_xlsx(_SAMPLE_ROWS)))
+
+    def boom(_report_date: date) -> tuple[ff.FloatRecord, ...]:
+        raise AssertionError("live download must not run when archive has the row")
+
+    monkeypatch.setattr(ff, "_download_report", boom)
+
+    found = ff.lookup("BIST:THYAO")
+    assert found is not None
+    assert found.code == "THYAO"
+    assert found.ratio == pytest.approx(50.43)
+
+
+def test_lookup_writes_through_on_miss(monkeypatch, tmp_path: Path) -> None:
+    store = _point_archive_at(monkeypatch, tmp_path)
+    # Live path returns the sample report without touching cache/ratelimit/network.
+    monkeypatch.setattr(
+        ff, "fetch_report", lambda *a, **k: ff._parse_xlsx(_make_xlsx(_SAMPLE_ROWS))
+    )
+
+    assert store.archive_stats()["reports"] == 0
+    found = ff.lookup("THYAO")
+    assert found is not None and found.code == "THYAO"
+    # The miss fetched live and wrote through to the archive.
+    assert store.archive_stats()["reports"] == 1
+    assert store.read_snapshot("THYAO") is not None
+
+
 def test_build_float_payload_single_and_all() -> None:
     records = ff._parse_xlsx(_make_xlsx(_SAMPLE_ROWS))
     single = ff.build_float_payload(records, single=records[0])

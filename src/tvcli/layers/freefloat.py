@@ -22,6 +22,7 @@ import io
 import re
 import xml.etree.ElementTree as ET
 import zipfile
+from contextlib import suppress
 from dataclasses import asdict, dataclass
 from datetime import UTC, date, datetime, timedelta
 from typing import Any
@@ -280,14 +281,51 @@ def fetch_report(
     ) from last_error
 
 
+def _archive_lookup(target_code: str, report_date: date | None) -> FloatRecord | None:
+    """Read one symbol from the local archive without touching the network.
+
+    Lazy import keeps the freefloat <-> freefloat_archive dependency one-way at
+    module load (the archive layer imports this module).
+    """
+    from .freefloat_archive import ArchiveStore
+
+    try:
+        store = ArchiveStore()
+        return store.read_snapshot(target_code, report_date)
+    except Exception:
+        # The archive is an optimization; never let a store error block a lookup.
+        return None
+
+
 def lookup(
     code: str,
     report_date: date | None = None,
     *,
     cache: SQLiteTTLCache | None = None,
     throttle: SQLiteTokenBucket | None = None,
+    use_archive: bool = True,
 ) -> FloatRecord | None:
+    """Free-float for one symbol, local-first.
+
+    Reads the persistent archive first; on a miss it fetches the live VAP report
+    and writes it through to the archive so the next lookup is offline. Passing
+    an explicit ``cache``/``throttle`` (tests) keeps the direct live path.
+    """
     target_code = normalize_code(code)
+
+    if use_archive and cache is None and throttle is None:
+        archived = _archive_lookup(target_code, report_date)
+        if archived is not None:
+            return archived
+        # Miss: fetch live, write through to the archive, then return.
+        records = fetch_report(report_date)
+        if records:
+            from .freefloat_archive import ArchiveStore
+
+            with suppress(Exception):
+                ArchiveStore().sync_records(records)
+        return next((r for r in records if r.code == target_code), None)
+
     for record in fetch_report(report_date, cache=cache, throttle=throttle):
         if record.code == target_code:
             return record

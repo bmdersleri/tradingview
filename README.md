@@ -51,6 +51,32 @@ flowchart LR
 ```cron
 0 * * * * /usr/bin/tvcli ta matrix BIST:THYAO --intervals 1h,4h,1d --json >> /var/log/tvcli-ta.jsonl
 15 9 * * 1-5 /usr/bin/tvcli data screen --market turkey --select name,close,RSI --where "RSI<30" --json >> /var/log/tvcli-screen.jsonl
+# Keep the local BIST free-float archive current (reports lag one business day):
+30 19 * * 1-5 /usr/bin/tvcli data float-sync --latest --json >> /var/log/tvcli-float.jsonl
+```
+
+## Free-float archive (BIST fiili dolaşım)
+
+`tvcli` keeps a persistent local archive of VAP/MKK free-float ratios at
+`~/.local/share/tvcli/archive.sqlite3`. Reads are local-first: `data float`,
+`chart signal`, and `chart analyze --auto` use the archive and only hit VAP on a
+miss (writing the result through).
+
+One-time historical backfill (resumable, gentle inter-request throttle — safe to
+interrupt and re-run with `--resume`):
+
+```bash
+nohup tvcli data float-sync --since 2024-01-01 --resume --rate-seconds 20 --json \
+  >> backfill.log 2>&1 &
+tvcli data float-stats --json   # watch coverage grow
+```
+
+Per-symbol analytics from the archive (no network):
+
+```bash
+tvcli data float-report THYAO --json     # trend, deltas, risk events
+tvcli data float-history THYAO --json
+tvcli data float-events --severity high --json
 ```
 
 ## Claude Code

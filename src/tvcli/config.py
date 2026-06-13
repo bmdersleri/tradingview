@@ -36,6 +36,10 @@ def default_cache_path() -> Path:
     return default_state_dir() / "cache.sqlite3"
 
 
+def default_archive_path() -> Path:
+    return default_data_dir() / "archive.sqlite3"
+
+
 def default_session_path() -> Path:
     return default_config_dir() / "session.json"
 
