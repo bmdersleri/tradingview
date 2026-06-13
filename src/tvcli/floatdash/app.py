@@ -336,7 +336,10 @@ def create_app(store: freefloat_archive.ArchiveStore | None = None) -> FastAPI:
             <span class="logo-title">BIST Free-Float Terminal</span>
         </div>
         <div class="search-container">
-            <input type="text" id="symbolSearch" class="search-input" placeholder="Search symbol (e.g. THYAO)" />
+            <div style="position: relative; display: flex; align-items: center;">
+                <input type="text" id="symbolSearch" class="search-input" placeholder="Search symbol or company..." />
+                <span id="searchClear" onclick="clearSearch()" style="position: absolute; right: 10px; cursor: pointer; color: var(--text-secondary); display: none; font-size: 1.1rem; user-select: none;">&times;</span>
+            </div>
             <button onclick="searchSymbol()" class="btn">Search</button>
         </div>
     </header>
@@ -496,15 +499,47 @@ def create_app(store: freefloat_archive.ArchiveStore | None = None) -> FastAPI:
             }
         }
 
+        const searchInput = document.getElementById('symbolSearch');
+        const clearBtn = document.getElementById('searchClear');
+
+        searchInput.addEventListener('input', (e) => {
+            const val = e.target.value.trim().toUpperCase();
+            clearBtn.style.display = val ? 'block' : 'none';
+
+            const items = document.querySelectorAll('.leaderboard-list .leaderboard-item');
+            items.forEach(item => {
+                if (item.id === 'item-market') return;
+
+                const code = item.querySelector('.item-code').innerText.toUpperCase();
+                const name = item.querySelector('.item-name').innerText.toUpperCase();
+
+                if (code.includes(val) || name.includes(val)) {
+                    item.style.display = 'flex';
+                } else {
+                    item.style.display = 'none';
+                }
+            });
+        });
+
+        function clearSearch() {
+            searchInput.value = '';
+            clearBtn.style.display = 'none';
+            searchInput.focus();
+
+            const items = document.querySelectorAll('.leaderboard-list .leaderboard-item');
+            items.forEach(item => {
+                item.style.display = 'flex';
+            });
+        }
+
         function searchSymbol() {
-            const input = document.getElementById('symbolSearch');
-            const val = input.value.trim().toUpperCase();
+            const val = searchInput.value.trim().toUpperCase();
             if (val) {
                 loadSymbol(val);
             }
         }
 
-        document.getElementById('symbolSearch').addEventListener('keypress', (e) => {
+        searchInput.addEventListener('keypress', (e) => {
             if (e.key === 'Enter') {
                 searchSymbol();
             }
