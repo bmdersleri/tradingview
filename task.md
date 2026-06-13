@@ -1,25 +1,26 @@
-# tvcli — Aktif Görevler & Durum Takip Dosyası
+# tvcli — Active Tasks & Status Tracking
 
-## Tamamlanan Altyapı İyileştirmeleri
-- [x] SQLite WAL (Write-Ahead Logging) Moduna Geçiş
-- [x] SQLite Bağlantı Zaman Aşımları (`timeout=10.0`)
-- [x] Süreç Genelinde Veritabanı Başına Tek Seferlik Şema Doğrulama
-- [x] Sunucu Kapanışlarında/Çökmelerinde Takılı Kalan (`running`) Görevlerin Sıfırlanması
-- [x] Dış İsteklerde (VAP Rapor İndirmeleri) Üstel Geri Çekilme (Exponential Backoff) & 3 Kez Yeniden Deneme (Retry)
-- [x] Dashboard Görselleri için HTTP ETag / Cache-Control Desteği
-- [x] FastAPI Arayüz Yanıtlarında GZip Sıkıştırması (`GZipMiddleware`)
-- [x] Yapılandırılmış JSON Formatında stderr Günlükleme (Structured JSON Logging)
-- [x] `justfile` Geliştirici Kısayolları (`reset-db`, `serve-dev`, `test-fast`)
-- [x] WebSocket ile Gerçek Zamanlı Dashboard Eşitleme Entegrasyonu
+## Completed Infrastructure Improvements
+- [x] Migrate to SQLite WAL (Write-Ahead Logging) Mode
+- [x] SQLite Connection Timeouts (`timeout=10.0`)
+- [x] Process-Wide Single-Time Schema Verification Per Database
+- [x] Reset stuck (`running`) tasks during server shutdowns/crashes
+- [x] Exponential Backoff & 3 Retries on external requests (VAP Report Downloads)
+- [x] HTTP ETag / Cache-Control support for Dashboard Images
+- [x] GZip Compression in FastAPI responses (`GZipMiddleware`)
+- [x] Structured JSON Logging to stderr
+- [x] `justfile` Developer Shortcuts (`reset-db`, `serve-dev`, `test-fast`)
+- [x] WebSocket Real-Time Dashboard Sync Integration
+- [x] Database Backup & Restore commands (`tvcli db backup/restore`) using SQLite Backup API
 
-## Yapılacak Görevler
-- [x] Geliştirici Test Verisi Seeding Komutu (`tvcli dev seed-db`) eklenmesi
-- [x] Arayüz üzerinden İnteraktif İndikatör Kontrolleri (SMA, EMA, WMA, RSI, MACD)
-- [x] Arayüz üzerinden Alarm Eşikleri ve Telegram Ayarları Paneli (Settings UI)
-- [x] Kronolojik Alarm Geçmişi ve Günlüğü Tablosu (Alert History)
-- [x] KAP Duyuruları Entegrasyonu ve Grafik Üzerinde Duyuru İkonları (KAP News)
-- [ ] Sektör Detay ve Karşılaştırma Sayfası (Sector Analysis)
+## Pending Tasks
+- [x] Add Developer Test Data Seeding Command (`tvcli dev seed-db`)
+- [x] Interactive Indicator Controls in UI (SMA, EMA, WMA, RSI, MACD)
+- [x] Alert Thresholds and Telegram Settings Panel in UI (Settings UI)
+- [x] Chronological Alert History and Audit Log Table (Alert History)
+- [x] KAP Public Disclosures Integration and timeline markers on charts (KAP News)
+- [ ] Sector Details and Comparison Page (Sector Analysis)
 
-## Aktif Geliştirme Detayları
-- **FastAPI Sunucusu Portu**: 8789
-- **Aktif Veritabanı Yolu**: `~/.local/share/tvcli/archive.sqlite3`
+## Active Development Details
+- **FastAPI Server Port**: 8789
+- **Active Database Path**: `~/.local/share/tvcli/archive.sqlite3`
