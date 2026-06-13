@@ -147,6 +147,10 @@ def create_app(store: freefloat_archive.ArchiveStore | None = None) -> FastAPI:
             background-color: var(--accent-hover);
         }
 
+        .btn:active {
+            transform: scale(0.98);
+        }
+
         .main-container {
             display: flex;
             flex: 1;
@@ -264,7 +268,6 @@ def create_app(store: freefloat_archive.ArchiveStore | None = None) -> FastAPI:
             border: 1px solid var(--border-color);
             border-radius: 12px;
             padding: 1.5rem;
-            flex: 1;
             display: flex;
             justify-content: center;
             align-items: center;
@@ -327,6 +330,66 @@ def create_app(store: freefloat_archive.ArchiveStore | None = None) -> FastAPI:
             font-weight: 600;
             display: none;
         }
+
+        /* Events and Alerts Styling */
+        .events-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.85rem;
+            text-align: left;
+        }
+
+        .events-table th {
+            padding: 0.75rem;
+            border-bottom: 1px solid var(--border-color);
+            color: var(--text-secondary);
+            font-weight: 600;
+            text-transform: uppercase;
+            font-size: 0.75rem;
+            letter-spacing: 0.5px;
+        }
+
+        .events-table td {
+            padding: 0.75rem;
+            border-bottom: 1px solid rgba(42, 46, 57, 0.2);
+            color: var(--text-primary);
+        }
+
+        .events-table tr:hover td {
+            background-color: rgba(255, 255, 255, 0.01);
+        }
+
+        .badge {
+            display: inline-block;
+            padding: 0.25rem 0.5rem;
+            border-radius: 4px;
+            font-size: 0.7rem;
+            font-weight: 700;
+            text-transform: uppercase;
+        }
+
+        .badge-high {
+            background-color: rgba(239, 83, 80, 0.15);
+            color: var(--bearish);
+            border: 1px solid rgba(239, 83, 80, 0.3);
+        }
+
+        .badge-medium {
+            background-color: rgba(245, 124, 0, 0.15);
+            color: var(--warning);
+            border: 1px solid rgba(245, 124, 0, 0.3);
+        }
+
+        .clickable-code {
+            color: var(--accent-color);
+            font-weight: 600;
+            cursor: pointer;
+            text-decoration: underline;
+        }
+
+        .clickable-code:hover {
+            color: var(--accent-hover);
+        }
     </style>
 </head>
 <body>
@@ -380,11 +443,63 @@ def create_app(store: freefloat_archive.ArchiveStore | None = None) -> FastAPI:
                 </div>
             </div>
 
+            <!-- Dashboard Chart Card -->
             <div class="chart-card">
                 <img id="chartImg" class="chart-img" src="/img/market.png" alt="Dashboard Chart" onload="hideLoader()" onerror="handleImageError()" />
                 <div id="loaderOverlay" class="loader-overlay active">
                     <div class="spinner"></div>
                     <p id="loaderText">Loading BIST Market Overview...</p>
+                </div>
+            </div>
+
+            <!-- Market Tab Events List -->
+            <div id="marketEventsCard" class="card">
+                <h3 style="margin-bottom: 0.5rem; display: flex; align-items: center; gap: 0.5rem;">
+                    <span>⚠️</span> Piyasa Alarm Akışı / Son Dramatik Değişiklikler
+                </h3>
+                <p style="font-size: 0.8rem; color: var(--text-secondary); margin-bottom: 1rem;">
+                    Fiili dolaşım oranlarında veya dolaşımdaki hisse sayılarında sert sıçramalar ya da kritik eşik geçişleri gözlenen hisseler.
+                </p>
+                <div style="overflow-x: auto;">
+                    <table class="events-table">
+                        <thead>
+                            <tr>
+                                <th>Hisse</th>
+                                <th>Tarih</th>
+                                <th>Olay / Açıklama</th>
+                                <th>Değer / Değişim</th>
+                                <th>Önem</th>
+                            </tr>
+                        </thead>
+                        <tbody id="marketEventsBody">
+                            <tr><td colspan="5" style="text-align: center; color: var(--text-secondary); padding: 1.5rem;">Yükleniyor...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Symbol Tab Events List -->
+            <div id="symbolEventsCard" class="card" style="display: none;">
+                <h3 style="margin-bottom: 0.5rem; display: flex; align-items: center; gap: 0.5rem;">
+                    <span>🔔</span> Hisse Olay Geçmişi & Risk Alarmları
+                </h3>
+                <p style="font-size: 0.8rem; color: var(--text-secondary); margin-bottom: 1rem;">
+                    Bu hissede geçmişte gerçekleşen fiili dolaşım değişimleri, sermaye hareketleri ve eşik geçişleri.
+                </p>
+                <div style="overflow-x: auto;">
+                    <table class="events-table">
+                        <thead>
+                            <tr>
+                                <th>Tarih</th>
+                                <th>Olay / Açıklama</th>
+                                <th>Değer / Değişim</th>
+                                <th>Önem</th>
+                            </tr>
+                        </thead>
+                        <tbody id="symbolEventsBody">
+                            <tr><td colspan="4" style="text-align: center; color: var(--text-secondary); padding: 1.5rem;">Hisse analizi yüklenince burası güncellenecektir.</td></tr>
+                        </tbody>
+                    </table>
                 </div>
             </div>
         </main>
@@ -393,13 +508,56 @@ def create_app(store: freefloat_archive.ArchiveStore | None = None) -> FastAPI:
     <script>
         let activeCode = 'MARKET';
 
-        // Fetch leaderboard data on startup
+        function getEventName(type) {
+            const names = {
+                'ratio_jump_up': 'Fiili Dolaşım Oranı Yükseldi 📈',
+                'ratio_jump_down': 'Fiili Dolaşım Oranı Düştü 📉',
+                'ratio_threshold_cross_down': 'Kritik Eşik Altına Geçiş ⚠️',
+                'ratio_threshold_cross_up': 'Kritik Eşik Üstüne Geçiş ✅',
+                'float_shares_jump_up': 'Dolaşımdaki Hisse Artışı 📊',
+                'float_shares_jump_down': 'Dolaşımdaki Hisse Düşüşü 📊',
+                'capital_change_detected': 'Sermaye Değişimi 💼',
+                'new_52w_high_ratio': '52 Haftalık Oran Zirvesi 🚀',
+                'new_52w_low_ratio': '52 Haftalık Oran Dibi 📉',
+                'liquidity_risk_low_float': 'Düşük Fiili Dolaşım Riski ⚠️'
+            };
+            return names[type] || type;
+        }
+
+        function formatEventValue(event) {
+            const type = event.event_type;
+            const payload = event.payload;
+            const val = event.metric_value;
+
+            if (type === 'ratio_jump_up' || type === 'ratio_jump_down') {
+                return `${val > 0 ? '+' : ''}${val.toFixed(2)}% (Mevcut: ${payload.ratio.toFixed(2)}%)`;
+            }
+            if (type === 'ratio_threshold_cross_down' || type === 'ratio_threshold_cross_up') {
+                return `${payload.from.toFixed(2)}% ➔ ${payload.to.toFixed(2)}%`;
+            }
+            if (type === 'float_shares_jump_up' || type === 'float_shares_jump_down') {
+                return `${val > 0 ? '+' : ''}${val.toFixed(1)}%`;
+            }
+            if (type === 'capital_change_detected') {
+                return `${val > 0 ? '+' : ''}${val.toLocaleString()}`;
+            }
+            if (type === 'new_52w_high_ratio' || type === 'new_52w_low_ratio') {
+                return `${payload.ratio.toFixed(2)}% (Zaman: ${payload.window} Rapor)`;
+            }
+            if (type === 'liquidity_risk_low_float') {
+                return `${payload.ratio.toFixed(2)}%`;
+            }
+            return val ? val.toString() : '-';
+        }
+
+        // Fetch leaderboard and market events on startup
         window.addEventListener('DOMContentLoaded', async () => {
             try {
                 const response = await fetch('/api/market');
                 if (!response.ok) return;
                 const data = await response.json();
-                
+
+                // Populate Sidebar
                 const list = document.getElementById('leaderboardList');
                 data.leaderboard.forEach(item => {
                     const li = document.createElement('li');
@@ -420,6 +578,27 @@ def create_app(store: freefloat_archive.ArchiveStore | None = None) -> FastAPI:
                     `;
                     list.appendChild(li);
                 });
+
+                // Populate market alerts table
+                const eventsBody = document.getElementById('marketEventsBody');
+                if (data.dramatic_changes && data.dramatic_changes.length > 0) {
+                    eventsBody.innerHTML = '';
+                    data.dramatic_changes.forEach(event => {
+                        const tr = document.createElement('tr');
+                        const badgeClass = event.severity === 'high' ? 'badge-high' : 'badge-medium';
+
+                        tr.innerHTML = `
+                            <td><span class="clickable-code" onclick="loadSymbol('${event.code}')">${event.code}</span></td>
+                            <td>${event.report_date}</td>
+                            <td>${getEventName(event.event_type)}</td>
+                            <td>${formatEventValue(event)}</td>
+                            <td><span class="badge ${badgeClass}">${event.severity}</span></td>
+                        `;
+                        eventsBody.appendChild(tr);
+                    });
+                } else {
+                    eventsBody.innerHTML = '<tr><td colspan="5" style="text-align: center; color: var(--text-secondary); padding: 1.5rem;">Hiçbir alarm/dramatik değişiklik bulunamadı.</td></tr>';
+                }
             } catch (err) {
                 console.error("Failed to load leaderboard:", err);
             }
@@ -446,10 +625,12 @@ def create_app(store: freefloat_archive.ArchiveStore | None = None) -> FastAPI:
             activeCode = 'MARKET';
             document.getElementById('errorBox').style.display = 'none';
             document.getElementById('infoBar').style.display = 'none';
-            
+            document.getElementById('symbolEventsCard').style.display = 'none';
+            document.getElementById('marketEventsCard').style.display = 'block';
+
             document.querySelectorAll('.leaderboard-item').forEach(item => item.classList.remove('active'));
             document.getElementById('item-market').classList.add('active');
-            
+
             showLoader("Loading BIST Market Overview...");
             document.getElementById('chartImg').src = `/img/market.png?t=${Date.now()}`;
         }
@@ -457,7 +638,9 @@ def create_app(store: freefloat_archive.ArchiveStore | None = None) -> FastAPI:
         async function loadSymbol(code) {
             activeCode = code.toUpperCase();
             document.getElementById('errorBox').style.display = 'none';
-            
+            document.getElementById('marketEventsCard').style.display = 'none';
+            document.getElementById('symbolEventsCard').style.display = 'block';
+
             document.querySelectorAll('.leaderboard-item').forEach(item => item.classList.remove('active'));
             const listItem = document.getElementById(`item-${activeCode}`);
             if (listItem) {
@@ -472,10 +655,10 @@ def create_app(store: freefloat_archive.ArchiveStore | None = None) -> FastAPI:
                 const response = await fetch(`/api/symbol/${activeCode}`);
                 if (!response.ok) return;
                 const data = await response.json();
-                
+
                 document.getElementById('infoSymbol').innerText = `${data.identity.code} / ${data.identity.name}`;
                 document.getElementById('infoRatio').innerText = `${data.latest.ratio.toFixed(2)}%`;
-                
+
                 const risk = data.risk;
                 let riskStr = 'NORMAL';
                 let riskColor = 'var(--bullish)';
@@ -492,8 +675,28 @@ def create_app(store: freefloat_archive.ArchiveStore | None = None) -> FastAPI:
 
                 const pct = data.percentile;
                 document.getElementById('infoPercentile').innerText = pct ? `lowest ${pct.rank}/${pct.total} (${pct.percentile.toFixed(1)}%)` : '-';
-                
+
                 document.getElementById('infoBar').style.display = 'grid';
+
+                // Populate symbol events table
+                const symEventsBody = document.getElementById('symbolEventsBody');
+                if (data.events && data.events.length > 0) {
+                    symEventsBody.innerHTML = '';
+                    data.events.forEach(event => {
+                        const tr = document.createElement('tr');
+                        const badgeClass = event.severity === 'high' ? 'badge-high' : 'badge-medium';
+
+                        tr.innerHTML = `
+                            <td>${event.report_date}</td>
+                            <td>${getEventName(event.event_type)}</td>
+                            <td>${formatEventValue(event)}</td>
+                            <td><span class="badge ${badgeClass}">${event.severity}</span></td>
+                        `;
+                        symEventsBody.appendChild(tr);
+                    });
+                } else {
+                    symEventsBody.innerHTML = '<tr><td colspan="4" style="text-align: center; color: var(--text-secondary); padding: 1.5rem;">Bu hisse için kayıtlı olay/alarm bulunmamaktadır.</td></tr>';
+                }
             } catch (err) {
                 console.error("Failed to load symbol details:", err);
             }
@@ -594,12 +797,28 @@ def create_app(store: freefloat_archive.ArchiveStore | None = None) -> FastAPI:
                 for r in event_rows
             ]
 
+            # Fetch latest market events representing changes
+            all_events = store.symbol_events(limit=100)
+            change_event_types = {
+                "ratio_jump_up",
+                "ratio_jump_down",
+                "ratio_threshold_cross_down",
+                "ratio_threshold_cross_up",
+                "float_shares_jump_up",
+                "float_shares_jump_down",
+                "capital_change_detected",
+            }
+            dramatic_changes = [
+                e for e in all_events if e["event_type"] in change_event_types
+            ]
+
             return {
                 "report_date": latest_date,
                 "n_symbols": n_symbols,
                 "median_ratio": round(median_ratio, 2),
                 "leaderboard": leaderboard,
                 "event_summary": event_summary,
+                "dramatic_changes": dramatic_changes[:30],  # Limit to top 30
             }
         except Exception as e:
             if isinstance(e, HTTPException):

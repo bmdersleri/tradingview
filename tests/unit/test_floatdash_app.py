@@ -77,6 +77,8 @@ def test_floatdash_app_endpoints(tmp_path: Path) -> None:
     market_data = resp_market_api.json()
     assert len(market_data["leaderboard"]) == 3
     assert market_data["median_ratio"] == 7.0
+    assert "dramatic_changes" in market_data
+    assert isinstance(market_data["dramatic_changes"], list)
 
     assert resp_symbol_api.status_code == 200
     assert resp_symbol_api.json()["identity"]["code"] == "THYAO"
