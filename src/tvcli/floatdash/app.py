@@ -47,6 +47,9 @@ def create_app(store: freefloat_archive.ArchiveStore | None = None) -> FastAPI:
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700&display=swap" rel="stylesheet">
+    <!-- TradingView Lightweight Charts & Chart.js -->
+    <script src="https://unpkg.com/lightweight-charts/dist/lightweight-charts.standalone.production.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
         :root {
             --bg-color: #0f111a;
@@ -269,8 +272,7 @@ def create_app(store: freefloat_archive.ArchiveStore | None = None) -> FastAPI:
             border-radius: 12px;
             padding: 1.5rem;
             display: flex;
-            justify-content: center;
-            align-items: center;
+            flex-direction: column;
             min-height: 500px;
             position: relative;
             box-shadow: 0 4px 24px rgba(0, 0, 0, 0.2);
@@ -486,12 +488,56 @@ def create_app(store: freefloat_archive.ArchiveStore | None = None) -> FastAPI:
                 </div>
             </div>
 
-            <!-- Dashboard Chart Card -->
+            <!-- Interactive Charts Container -->
             <div class="chart-card">
-                <img id="chartImg" class="chart-img" src="/img/market.png" alt="Dashboard Chart" onload="hideLoader()" onerror="handleImageError()" />
                 <div id="loaderOverlay" class="loader-overlay active">
                     <div class="spinner"></div>
                     <p id="loaderText">Loading BIST Market Overview...</p>
+                </div>
+
+                <!-- Market Charts Container -->
+                <div id="marketChartsContainer" style="display: grid; grid-template-columns: 3fr 2fr; gap: 1.5rem; width: 100%; height: 500px;">
+                    <div style="background-color: rgba(24, 28, 39, 0.4); border: 1px solid var(--border-color); border-radius: 8px; padding: 1rem; position: relative;">
+                        <span class="info-label" style="display: block; margin-bottom: 0.5rem;">Oran Dağılımı (Histogram)</span>
+                        <div style="position: relative; width: 100%; height: calc(100% - 24px);">
+                            <canvas id="histogramChart"></canvas>
+                        </div>
+                    </div>
+                    <div style="display: grid; grid-template-rows: 1fr 1fr; gap: 1.5rem; height: 100%;">
+                        <div style="background-color: rgba(24, 28, 39, 0.4); border: 1px solid var(--border-color); border-radius: 8px; padding: 1rem; position: relative;">
+                            <span class="info-label" style="display: block; margin-bottom: 0.5rem;">En Düşük Oranlı Hisseler</span>
+                            <div style="position: relative; width: 100%; height: calc(100% - 24px);">
+                                <canvas id="leaderboardChart"></canvas>
+                            </div>
+                        </div>
+                        <div style="background-color: rgba(24, 28, 39, 0.4); border: 1px solid var(--border-color); border-radius: 8px; padding: 1rem; position: relative;">
+                            <span class="info-label" style="display: block; margin-bottom: 0.5rem;">Aktif Kritik Alarmlar (Son Rapor)</span>
+                            <div style="position: relative; width: 100%; height: calc(100% - 24px);">
+                                <canvas id="eventsChart"></canvas>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Symbol Charts Container -->
+                <div id="symbolChartsContainer" style="display: none; flex-direction: column; gap: 1rem; width: 100%;">
+                    <!-- Chart Settings Toggles -->
+                    <div style="display: flex; gap: 1.5rem; align-items: center; background-color: rgba(24, 28, 39, 0.4); border: 1px solid var(--border-color); border-radius: 8px; padding: 0.5rem 1rem; font-size: 0.85rem;">
+                        <span style="font-weight: 600; color: var(--text-secondary);">GÖSTERGELER:</span>
+                        <label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer; user-select: none;">
+                            <input type="checkbox" id="toggleSma" checked onchange="updateSymbolCharts()" /> SMA 20 (Sarı)
+                        </label>
+                        <label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer; user-select: none;">
+                            <input type="checkbox" id="toggleEma" checked onchange="updateSymbolCharts()" /> EMA 20 (Mor)
+                        </label>
+                        <label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer; user-select: none;">
+                            <input type="checkbox" id="toggleThresholds" checked onchange="updateSymbolCharts()" /> Eşik Çizgileri (%10 & %20)
+                        </label>
+                    </div>
+
+                    <!-- Chart Divs -->
+                    <div id="ratioChartDiv" style="width: 100%; height: 320px; border-radius: 8px; overflow: hidden; border: 1px solid var(--border-color);"></div>
+                    <div id="sharesChartDiv" style="width: 100%; height: 160px; border-radius: 8px; overflow: hidden; border: 1px solid var(--border-color);"></div>
                 </div>
             </div>
 
@@ -610,6 +656,374 @@ def create_app(store: freefloat_archive.ArchiveStore | None = None) -> FastAPI:
 
     <script>
         let activeCode = 'MARKET';
+        let cachedMarketData = null;
+
+        let ratioChartInstance = null;
+        let sharesChartInstance = null;
+        let areaSeries = null;
+        let smaSeries = null;
+        let emaSeries = null;
+        let thresholdLine10 = null;
+        let thresholdLine20 = null;
+        let sharesSeries = null;
+        let activeLine10 = null;
+        let activeLine20 = null;
+
+        let histogramChartInstance = null;
+        let leaderboardChartInstance = null;
+        let eventsChartInstance = null;
+
+        function parseDateToISO(dateStr) {
+            if (!dateStr) return '';
+            if (/^\\d{4}-\\d{2}-\\d{2}$/.test(dateStr)) return dateStr;
+            const match = dateStr.match(/^(\\d{2})\\.(\\d{2})\\.(\\d{4})$/);
+            if (match) {
+                return `${match[3]}-${match[2]}-${match[1]}`;
+            }
+            return dateStr;
+        }
+
+        function calculateSMA(data, period) {
+            const sma = [];
+            for (let i = 0; i < data.length; i++) {
+                if (i < period - 1) {
+                    let sum = 0;
+                    for (let j = 0; j <= i; j++) sum += data[j].value;
+                    sma.push({ time: data[i].time, value: sum / (i + 1) });
+                } else {
+                    let sum = 0;
+                    for (let j = i - period + 1; j <= i; j++) sum += data[j].value;
+                    sma.push({ time: data[i].time, value: sum / period });
+                }
+            }
+            return sma;
+        }
+
+        function calculateEMA(data, period) {
+            const ema = [];
+            if (data.length === 0) return ema;
+            const k = 2 / (period + 1);
+            let emaVal = data[0].value;
+            ema.push({ time: data[0].time, value: emaVal });
+            for (let i = 1; i < data.length; i++) {
+                emaVal = data[i].value * k + emaVal * (1 - k);
+                ema.push({ time: data[i].time, value: emaVal });
+            }
+            return ema;
+        }
+
+        function createSymbolCharts(recentChanges, risk) {
+            if (ratioChartInstance) {
+                ratioChartInstance.remove();
+                ratioChartInstance = null;
+            }
+            if (sharesChartInstance) {
+                sharesChartInstance.remove();
+                sharesChartInstance = null;
+            }
+
+            const ratioContainer = document.getElementById('ratioChartDiv');
+            const sharesContainer = document.getElementById('sharesChartDiv');
+
+            const sortedData = [...recentChanges].reverse().map(item => {
+                const parsedDate = parseDateToISO(item.report_date);
+                return {
+                    time: parsedDate,
+                    ratio: item.ratio,
+                    shares: item.float_shares
+                };
+            }).filter(d => d.time);
+
+            if (sortedData.length === 0) return;
+
+            const ratioData = sortedData.map(d => ({ time: d.time, value: d.ratio }));
+            const sharesData = sortedData.map(d => ({ time: d.time, value: d.shares }));
+
+            const chartOptions = {
+                layout: {
+                    background: { type: 'solid', color: '#181c27' },
+                    textColor: '#d1d4dc',
+                    fontFamily: "'Outfit', sans-serif",
+                },
+                grid: {
+                    vertLines: { color: 'rgba(42, 46, 57, 0.15)', style: 3 },
+                    horzLines: { color: 'rgba(42, 46, 57, 0.15)', style: 3 },
+                },
+                rightPriceScale: {
+                    borderColor: 'rgba(42, 46, 57, 0.3)',
+                },
+                timeScale: {
+                    borderColor: 'rgba(42, 46, 57, 0.3)',
+                },
+            };
+
+            ratioChartInstance = LightweightCharts.createChart(ratioContainer, {
+                ...chartOptions,
+                width: ratioContainer.clientWidth || 800,
+                height: 320,
+            });
+
+            const lineColor = risk.low_float ? '#ef5350' : '#26a69a';
+            const areaColor = risk.low_float ? 'rgba(239, 83, 80, 0.15)' : 'rgba(38, 166, 154, 0.15)';
+
+            areaSeries = ratioChartInstance.addAreaSeries({
+                lineColor: lineColor,
+                topColor: areaColor,
+                bottomColor: 'rgba(15, 17, 26, 0.0)',
+                lineWidth: 2.5,
+                priceFormat: {
+                    type: 'custom',
+                    formatter: price => price.toFixed(2) + '%',
+                },
+            });
+            areaSeries.setData(ratioData);
+
+            smaSeries = ratioChartInstance.addLineSeries({
+                color: '#ffaa00',
+                lineWidth: 1.5,
+                lineStyle: 2,
+                priceLineVisible: false,
+            });
+            const smaData = calculateSMA(ratioData, 20);
+            smaSeries.setData(smaData);
+
+            emaSeries = ratioChartInstance.addLineSeries({
+                color: '#9c27b0',
+                lineWidth: 1.5,
+                lineStyle: 0,
+                priceLineVisible: false,
+            });
+            const emaData = calculateEMA(ratioData, 20);
+            emaSeries.setData(emaData);
+
+            thresholdLine10 = {
+                price: 10.0,
+                color: '#ef5350',
+                lineWidth: 1,
+                lineStyle: 3,
+                axisLabelVisible: true,
+                title: 'Severe Limit (10%)',
+            };
+            thresholdLine20 = {
+                price: 20.0,
+                color: '#ffaa00',
+                lineWidth: 1,
+                lineStyle: 3,
+                axisLabelVisible: true,
+                title: 'Low Limit (20%)',
+            };
+
+            sharesChartInstance = LightweightCharts.createChart(sharesContainer, {
+                ...chartOptions,
+                width: sharesContainer.clientWidth || 800,
+                height: 160,
+            });
+
+            sharesSeries = sharesChartInstance.addHistogramSeries({
+                color: 'rgba(38, 166, 154, 0.6)',
+                priceFormat: {
+                    type: 'volume',
+                },
+            });
+            sharesSeries.setData(sharesData);
+
+            ratioChartInstance.timeScale().subscribeVisibleTimeRangeChange(range => {
+                sharesChartInstance.timeScale().setVisibleRange(range);
+            });
+            sharesChartInstance.timeScale().subscribeVisibleTimeRangeChange(range => {
+                ratioChartInstance.timeScale().setVisibleRange(range);
+            });
+
+            updateSymbolCharts();
+            ratioChartInstance.timeScale().fitContent();
+        }
+
+        function updateSymbolCharts() {
+            if (!ratioChartInstance || !areaSeries) return;
+
+            const showSma = document.getElementById('toggleSma').checked;
+            const showEma = document.getElementById('toggleEma').checked;
+            const showThresholds = document.getElementById('toggleThresholds').checked;
+
+            if (smaSeries) smaSeries.applyOptions({ visible: showSma });
+            if (emaSeries) emaSeries.applyOptions({ visible: showEma });
+
+            if (activeLine10) {
+                areaSeries.removePriceLine(activeLine10);
+                activeLine10 = null;
+            }
+            if (activeLine20) {
+                areaSeries.removePriceLine(activeLine20);
+                activeLine20 = null;
+            }
+
+            if (showThresholds) {
+                activeLine10 = areaSeries.createPriceLine(thresholdLine10);
+                activeLine20 = areaSeries.createPriceLine(thresholdLine20);
+            }
+        }
+
+        function createMarketCharts(data) {
+            if (histogramChartInstance) histogramChartInstance.destroy();
+            if (leaderboardChartInstance) leaderboardChartInstance.destroy();
+            if (eventsChartInstance) eventsChartInstance.destroy();
+
+            const ratios = data.leaderboard.map(item => item.ratio);
+            const binSize = 2.5;
+            const binsCount = Math.ceil(100 / binSize);
+            const bins = Array.from({ length: binsCount }, (_, i) => ({
+                label: `${(i * binSize).toFixed(1)}-${((i + 1) * binSize).toFixed(1)}%`,
+                min: i * binSize,
+                max: (i + 1) * binSize,
+                count: 0
+            }));
+            ratios.forEach(r => {
+                const idx = Math.min(Math.floor(r / binSize), bins.length - 1);
+                if (idx >= 0 && idx < bins.length) bins[idx].count++;
+            });
+            const activeBins = bins.filter(b => b.count > 0 || b.min < 50);
+
+            const histCtx = document.getElementById('histogramChart').getContext('2d');
+            histogramChartInstance = new Chart(histCtx, {
+                type: 'bar',
+                data: {
+                    labels: activeBins.map(b => b.label),
+                    datasets: [{
+                        label: 'Hisse Sayısı',
+                        data: activeBins.map(b => b.count),
+                        backgroundColor: 'rgba(38, 166, 154, 0.65)',
+                        borderColor: '#26a69a',
+                        borderWidth: 1,
+                        barPercentage: 0.95,
+                        categoryPercentage: 0.95,
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: {
+                            backgroundColor: '#1e222d',
+                            titleColor: '#d1d4dc',
+                            bodyColor: '#d1d4dc',
+                            borderColor: 'rgba(42, 46, 57, 0.4)',
+                            borderWidth: 1,
+                        }
+                    },
+                    scales: {
+                        x: {
+                            grid: { color: 'rgba(42, 46, 57, 0.15)' },
+                            ticks: { color: '#787b86', font: { size: 9 } }
+                        },
+                        y: {
+                            grid: { color: 'rgba(42, 46, 57, 0.15)' },
+                            ticks: { color: '#787b86', font: { size: 9 } }
+                        }
+                    }
+                }
+            });
+
+            const lowestItems = data.leaderboard.slice(0, 15);
+            const leadCtx = document.getElementById('leaderboardChart').getContext('2d');
+            
+            const leadColors = lowestItems.map(item => {
+                if (item.ratio < 10.0) return 'rgba(239, 83, 80, 0.75)';
+                if (item.ratio < 20.0) return 'rgba(245, 124, 0, 0.75)';
+                return 'rgba(38, 166, 154, 0.75)';
+            });
+
+            leaderboardChartInstance = new Chart(leadCtx, {
+                type: 'bar',
+                data: {
+                    labels: lowestItems.map(item => item.code),
+                    datasets: [{
+                        label: 'Dolaşım Oranı',
+                        data: lowestItems.map(item => item.ratio),
+                        backgroundColor: leadColors,
+                        borderWidth: 0,
+                        borderRadius: 4,
+                    }]
+                },
+                options: {
+                    indexAxis: 'y',
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: {
+                            backgroundColor: '#1e222d',
+                            titleColor: '#d1d4dc',
+                            bodyColor: '#d1d4dc',
+                            borderColor: 'rgba(42, 46, 57, 0.4)',
+                            borderWidth: 1,
+                        }
+                    },
+                    scales: {
+                        x: {
+                            grid: { color: 'rgba(42, 46, 57, 0.15)' },
+                            ticks: { color: '#787b86', font: { size: 9 } }
+                        },
+                        y: {
+                            grid: { display: false },
+                            ticks: { color: '#d1d4dc', font: { size: 9, weight: 'bold' } }
+                        }
+                    }
+                }
+            });
+
+            const eventLabels = data.event_summary.map(item => getEventName(item.event_type));
+            const eventCounts = data.event_summary.map(item => item.count);
+            const eventsCtx = document.getElementById('eventsChart').getContext('2d');
+
+            eventsChartInstance = new Chart(eventsCtx, {
+                type: 'bar',
+                data: {
+                    labels: eventLabels,
+                    datasets: [{
+                        label: 'Olay Sayısı',
+                        data: eventCounts,
+                        backgroundColor: 'rgba(245, 124, 0, 0.75)',
+                        borderWidth: 0,
+                        borderRadius: 4,
+                    }]
+                },
+                options: {
+                    indexAxis: 'y',
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: {
+                            backgroundColor: '#1e222d',
+                            titleColor: '#d1d4dc',
+                            bodyColor: '#d1d4dc',
+                            borderColor: 'rgba(42, 46, 57, 0.4)',
+                            borderWidth: 1,
+                        }
+                    },
+                    scales: {
+                        x: {
+                            grid: { color: 'rgba(42, 46, 57, 0.15)' },
+                            ticks: { color: '#787b86', font: { size: 9 }, stepSize: 1 }
+                        },
+                        y: {
+                            grid: { display: false },
+                            ticks: { color: '#d1d4dc', font: { size: 8 } }
+                        }
+                    }
+                }
+            });
+        }
+
+        window.addEventListener('resize', () => {
+            if (ratioChartInstance && document.getElementById('symbolChartsContainer').style.display === 'flex') {
+                const ratioContainer = document.getElementById('ratioChartDiv');
+                const sharesContainer = document.getElementById('sharesChartDiv');
+                ratioChartInstance.resize(ratioContainer.clientWidth, 320);
+                sharesChartInstance.resize(sharesContainer.clientWidth, 160);
+            }
+        });
 
         function getEventName(type) {
             const names = {
@@ -788,15 +1202,20 @@ def create_app(store: freefloat_archive.ArchiveStore | None = None) -> FastAPI:
             document.getElementById('errorBox').style.display = 'none';
             document.getElementById('infoBar').style.display = 'none';
             document.getElementById('symbolEventsCard').style.display = 'none';
+            document.getElementById('symbolChartsContainer').style.display = 'none';
+            
             document.getElementById('marketInfoBar').style.display = 'grid';
             document.getElementById('marketInsightsContainer').style.display = 'grid';
+            document.getElementById('marketChartsContainer').style.display = 'grid';
             document.getElementById('marketEventsCard').style.display = 'block';
 
             document.querySelectorAll('.leaderboard-item').forEach(item => item.classList.remove('active'));
             document.getElementById('item-market').classList.add('active');
 
-            showLoader("Loading BIST Market Overview...");
-            document.getElementById('chartImg').src = `/img/market.png?t=${Date.now()}`;
+            hideLoader();
+            if (cachedMarketData) {
+                createMarketCharts(cachedMarketData);
+            }
         }
 
         async function loadSymbol(code) {
@@ -805,7 +1224,10 @@ def create_app(store: freefloat_archive.ArchiveStore | None = None) -> FastAPI:
             document.getElementById('marketEventsCard').style.display = 'none';
             document.getElementById('marketInfoBar').style.display = 'none';
             document.getElementById('marketInsightsContainer').style.display = 'none';
+            document.getElementById('marketChartsContainer').style.display = 'none';
+            
             document.getElementById('symbolEventsCard').style.display = 'block';
+            document.getElementById('symbolChartsContainer').style.display = 'flex';
 
             document.querySelectorAll('.leaderboard-item').forEach(item => item.classList.remove('active'));
             const listItem = document.getElementById(`item-${activeCode}`);
@@ -815,11 +1237,14 @@ def create_app(store: freefloat_archive.ArchiveStore | None = None) -> FastAPI:
             }
 
             showLoader(`Generating Deep-Dive for ${activeCode}...`);
-            document.getElementById('chartImg').src = `/img/symbol/${activeCode}.png?t=${Date.now()}`;
 
             try {
                 const response = await fetch(`/api/symbol/${activeCode}`);
-                if (!response.ok) return;
+                if (!response.ok) {
+                    hideLoader();
+                    handleImageError();
+                    return;
+                }
                 const data = await response.json();
 
                 document.getElementById('infoSymbol').innerText = `${data.identity.code} / ${data.identity.name}`;
@@ -863,8 +1288,14 @@ def create_app(store: freefloat_archive.ArchiveStore | None = None) -> FastAPI:
                 } else {
                     symEventsBody.innerHTML = '<tr><td colspan="4" style="text-align: center; color: var(--text-secondary); padding: 1.5rem;">Bu hisse için kayıtlı olay/alarm bulunmamaktadır.</td></tr>';
                 }
+
+                hideLoader();
+                createSymbolCharts(data.recent_changes, risk);
+
             } catch (err) {
+                hideLoader();
                 console.error("Failed to load symbol details:", err);
+                handleImageError();
             }
         }
 
@@ -1083,7 +1514,7 @@ def create_app(store: freefloat_archive.ArchiveStore | None = None) -> FastAPI:
     @app.get("/api/symbol/{code}")
     async def get_api_symbol(code: str) -> Any:
         try:
-            report = store.build_symbol_report(code.upper())
+            report = store.build_symbol_report(code.upper(), limit=1000)
             return report
         except Exception as e:
             from ..errors import NotFoundError
