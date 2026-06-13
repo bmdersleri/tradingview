@@ -17,20 +17,20 @@ _PNG_MAGIC = b"\x89PNG\r\n\x1a\n"
 def _seed_store(
     store: ArchiveStore, codes: list[str], ratio_base: float = 35.0
 ) -> None:
+    records = []
     for i, code in enumerate(codes):
-        store.sync_records(
-            (
-                ff.FloatRecord(
-                    code=code,
-                    isin=f"TR{i:06d}",
-                    name=code,
-                    float_shares=500.0 + i * 10,
-                    capital=1000.0 + i * 10,
-                    ratio=ratio_base + i * 2.0,
-                    date="10.06.2026",
-                ),
+        records.append(
+            ff.FloatRecord(
+                code=code,
+                isin=f"TR{i:06d}",
+                name=code,
+                float_shares=500.0 + i * 10,
+                capital=1000.0 + i * 10,
+                ratio=ratio_base + i * 2.0,
+                date="10.06.2026",
             )
         )
+    store.sync_records(tuple(records))
 
 
 def test_deep_dive_renders_png(tmp_path: Path) -> None:
