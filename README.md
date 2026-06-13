@@ -74,10 +74,31 @@ tvcli data float-stats --json   # watch coverage grow
 Per-symbol analytics from the archive (no network):
 
 ```bash
-tvcli data float-report THYAO --json     # trend, deltas, risk events
+tvcli data float-report THYAO --json     # trend, deltas, risk events, percentile, liquidity
 tvcli data float-history THYAO --json
 tvcli data float-events --severity high --json
 ```
+
+Check archive coverage and find gaps:
+
+```bash
+tvcli data float-verify --since 2024-01-01 --until 2026-06-11 --json
+# → {business_days, stored, known_empty, gaps: [...], coverage_pct}
+```
+
+Render free-float PNG dashboards (headless matplotlib, no browser):
+
+```bash
+# Single-symbol deep dive: ratio history + threshold lines + event markers
+tvcli data float-dashboard THYAO --out thyao_float.png --json
+
+# Market-wide overview: distribution histogram + lowest-float leaderboard
+tvcli data float-dashboard --market --out bist_float_overview.png --json
+```
+
+`chart signal BIST:THYAO` includes a `free_float_trend` vote (derived from the
+last 20 archived ratio readings) alongside the price-derived votes. Falling float
+dampen signal confidence; rising float adds mild directional context.
 
 ## Claude Code
 
