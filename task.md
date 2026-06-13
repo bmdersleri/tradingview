@@ -12,8 +12,12 @@
 - [x] `justfile` Geliştirici Kısayolları (`reset-db`, `serve-dev`, `test-fast`)
 
 ## Yapılacak Görevler
-- [ ] Geliştirici Test Verisi Seeding Komutu (`tvcli dev seed-db`) eklenmesi [ŞU ANDA YAPILIYOR]
-- [ ] Grafik Çizim ve İnceleme Katmanlarının İyileştirilmesi
+- [x] Geliştirici Test Verisi Seeding Komutu (`tvcli dev seed-db`) eklenmesi
+- [ ] Arayüz üzerinden İnteraktif İndikatör Kontrolleri (SMA, EMA, WMA, RSI, MACD)
+- [ ] Arayüz üzerinden Alarm Eşikleri ve Telegram Ayarları Paneli (Settings UI)
+- [ ] Kronolojik Alarm Geçmişi ve Günlüğü Tablosu (Alert History)
+- [ ] KAP Duyuruları Entegrasyonu ve Grafik Üzerinde Duyuru İkonları (KAP News)
+- [ ] Sektör Detay ve Karşılaştırma Sayfası (Sector Analysis)
 
 ## Aktif Geliştirme Detayları
 - **FastAPI Sunucusu Portu**: 8789
