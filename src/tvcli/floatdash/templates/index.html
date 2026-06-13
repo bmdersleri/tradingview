@@ -93,6 +93,23 @@
             border-color: var(--accent-color);
         }
 
+        .indicator-param-input {
+            width: 44px;
+            background-color: #1e222d;
+            border: 1px solid var(--border-color);
+            color: var(--text-primary);
+            text-align: center;
+            border-radius: 4px;
+            padding: 2px 4px;
+            font-size: 0.75rem;
+            outline: none;
+            transition: border-color 0.2s;
+        }
+
+        .indicator-param-input:focus {
+            border-color: var(--accent-color);
+        }
+
         .btn {
             background-color: var(--accent-color);
             color: #ffffff;
@@ -517,27 +534,69 @@
                 <div id="symbolChartsContainer" style="display: none; flex-direction: column; gap: 1rem; width: 100%;">
                     <!-- Chart Settings Toggles & Comparison Input -->
                     <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 1rem; background-color: rgba(24, 28, 39, 0.4); border: 1px solid var(--border-color); border-radius: 8px; padding: 0.5rem 1rem; font-size: 0.85rem;">
-                        <div style="display: flex; gap: 1.5rem; align-items: center;">
+                        <div style="display: flex; gap: 1rem; align-items: center; flex-wrap: wrap;">
                             <span style="font-weight: 600; color: var(--text-secondary);">GÖSTERGELER:</span>
-                            <label id="lblSma" style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer; user-select: none;">
-                                <input type="checkbox" id="toggleSma" checked onchange="updateSymbolCharts()" /> SMA 20 (Sarı)
-                            </label>
-                            <label id="lblEma" style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer; user-select: none;">
-                                <input type="checkbox" id="toggleEma" checked onchange="updateSymbolCharts()" /> EMA 20 (Mor)
-                            </label>
-                            <label id="lblWma" style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer; user-select: none;">
-                                <input type="checkbox" id="toggleWma" onchange="updateSymbolCharts()" /> WMA 20 (Mavi)
-                            </label>
-                            <label id="lblBbands" style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer; user-select: none;">
-                                <input type="checkbox" id="toggleBbands" onchange="updateSymbolCharts()" /> BBands (20, 2)
-                            </label>
-                            <label id="lblRsi" style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer; user-select: none;">
-                                <input type="checkbox" id="toggleRsi" onchange="toggleIndicatorPanes()" /> RSI 14
-                            </label>
-                            <label id="lblMacd" style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer; user-select: none;">
-                                <input type="checkbox" id="toggleMacd" onchange="toggleIndicatorPanes()" /> MACD
-                            </label>
-                            <label id="lblThresholds" style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer; user-select: none;">
+                            
+                            <!-- SMA -->
+                            <div style="display: flex; align-items: center; gap: 0.25rem;">
+                                <label id="lblSma" style="display: flex; align-items: center; gap: 0.25rem; cursor: pointer; user-select: none; margin-bottom: 0;">
+                                    <input type="checkbox" id="toggleSma" checked onchange="updateSymbolCharts()" /> SMA
+                                </label>
+                                <input type="number" id="periodSma" value="20" min="2" max="200" class="indicator-param-input" onchange="recalculateAndRedrawIndicators()" />
+                                <span style="font-size: 0.75rem; color: #ffaa00; font-weight: bold; margin-left: 0.1rem;" title="SMA (Sarı)">●</span>
+                            </div>
+
+                            <!-- EMA -->
+                            <div style="display: flex; align-items: center; gap: 0.25rem;">
+                                <label id="lblEma" style="display: flex; align-items: center; gap: 0.25rem; cursor: pointer; user-select: none; margin-bottom: 0;">
+                                    <input type="checkbox" id="toggleEma" checked onchange="updateSymbolCharts()" /> EMA
+                                </label>
+                                <input type="number" id="periodEma" value="20" min="2" max="200" class="indicator-param-input" onchange="recalculateAndRedrawIndicators()" />
+                                <span style="font-size: 0.75rem; color: #9c27b0; font-weight: bold; margin-left: 0.1rem;" title="EMA (Mor)">●</span>
+                            </div>
+
+                            <!-- WMA -->
+                            <div style="display: flex; align-items: center; gap: 0.25rem;">
+                                <label id="lblWma" style="display: flex; align-items: center; gap: 0.25rem; cursor: pointer; user-select: none; margin-bottom: 0;">
+                                    <input type="checkbox" id="toggleWma" onchange="updateSymbolCharts()" /> WMA
+                                </label>
+                                <input type="number" id="periodWma" value="20" min="2" max="200" class="indicator-param-input" onchange="recalculateAndRedrawIndicators()" />
+                                <span style="font-size: 0.75rem; color: #00b0ff; font-weight: bold; margin-left: 0.1rem;" title="WMA (Mavi)">●</span>
+                            </div>
+
+                            <!-- Bollinger Bands -->
+                            <div style="display: flex; align-items: center; gap: 0.25rem;">
+                                <label id="lblBbands" style="display: flex; align-items: center; gap: 0.25rem; cursor: pointer; user-select: none; margin-bottom: 0;">
+                                    <input type="checkbox" id="toggleBbands" onchange="updateSymbolCharts()" /> BBands
+                                </label>
+                                <input type="number" id="periodBbands" value="20" min="2" max="200" class="indicator-param-input" onchange="recalculateAndRedrawIndicators()" />
+                                <span style="font-size: 0.75rem; color: var(--text-secondary);">std</span>
+                                <input type="number" id="multBbands" value="2" step="0.1" min="0.5" max="10" class="indicator-param-input" style="width: 32px;" onchange="recalculateAndRedrawIndicators()" />
+                                <span style="font-size: 0.75rem; color: rgba(41, 182, 246, 0.8); font-weight: bold; margin-left: 0.1rem;" title="BBands (Açık Mavi)">●</span>
+                            </div>
+
+                            <!-- RSI -->
+                            <div style="display: flex; align-items: center; gap: 0.25rem;">
+                                <label id="lblRsi" style="display: flex; align-items: center; gap: 0.25rem; cursor: pointer; user-select: none; margin-bottom: 0;">
+                                    <input type="checkbox" id="toggleRsi" onchange="toggleIndicatorPanes()" /> RSI
+                                </label>
+                                <input type="number" id="periodRsi" value="14" min="2" max="200" class="indicator-param-input" onchange="recalculateAndRedrawIndicators()" />
+                                <span style="font-size: 0.75rem; color: #ab47bc; font-weight: bold; margin-left: 0.1rem;" title="RSI (Eflatun)">●</span>
+                            </div>
+
+                            <!-- MACD -->
+                            <div style="display: flex; align-items: center; gap: 0.25rem;">
+                                <label id="lblMacd" style="display: flex; align-items: center; gap: 0.25rem; cursor: pointer; user-select: none; margin-bottom: 0;">
+                                    <input type="checkbox" id="toggleMacd" onchange="toggleIndicatorPanes()" /> MACD
+                                </label>
+                                <input type="number" id="periodMacdFast" value="12" min="2" max="200" class="indicator-param-input" style="width: 36px;" onchange="recalculateAndRedrawIndicators()" title="MACD Fast Period" />
+                                <input type="number" id="periodMacdSlow" value="26" min="2" max="200" class="indicator-param-input" style="width: 36px;" onchange="recalculateAndRedrawIndicators()" title="MACD Slow Period" />
+                                <input type="number" id="periodMacdSignal" value="9" min="2" max="200" class="indicator-param-input" style="width: 36px;" onchange="recalculateAndRedrawIndicators()" title="MACD Signal Period" />
+                                <span style="font-size: 0.75rem; color: #29b6f6; font-weight: bold; margin-left: 0.1rem;" title="MACD (Mavi/Turuncu)">●</span>
+                            </div>
+
+                            <!-- Thresholds -->
+                            <label id="lblThresholds" style="display: flex; align-items: center; gap: 0.25rem; cursor: pointer; user-select: none; margin-bottom: 0;">
                                 <input type="checkbox" id="toggleThresholds" checked onchange="updateSymbolCharts()" /> Eşik Çizgileri (%10 & %20)
                             </label>
                         </div>
@@ -1297,6 +1356,17 @@
                 areaSeries.setMarkers(allMarkers);
             }
 
+            // Read configured indicator parameters dynamically
+            const periodSma = Math.max(2, parseInt(document.getElementById('periodSma').value, 10) || 20);
+            const periodEma = Math.max(2, parseInt(document.getElementById('periodEma').value, 10) || 20);
+            const periodWma = Math.max(2, parseInt(document.getElementById('periodWma').value, 10) || 20);
+            const periodBbands = Math.max(2, parseInt(document.getElementById('periodBbands').value, 10) || 20);
+            const multBbands = Math.max(0.1, parseFloat(document.getElementById('multBbands').value) || 2);
+            const periodRsi = Math.max(2, parseInt(document.getElementById('periodRsi').value, 10) || 14);
+            const fastMacd = Math.max(2, parseInt(document.getElementById('periodMacdFast').value, 10) || 12);
+            const slowMacd = Math.max(2, parseInt(document.getElementById('periodMacdSlow').value, 10) || 26);
+            const signalMacd = Math.max(2, parseInt(document.getElementById('periodMacdSignal').value, 10) || 9);
+
             // Map all indicators to the LEFT price scale as they measure free float %
             smaSeries = ratioChartInstance.addLineSeries({
                 priceScaleId: 'left',
@@ -1305,7 +1375,7 @@
                 lineStyle: 2,
                 priceLineVisible: false,
             });
-            const smaData = calculateSMA(ratioData, 20);
+            const smaData = calculateSMA(ratioData, periodSma);
             smaSeries.setData(smaData);
 
             emaSeries = ratioChartInstance.addLineSeries({
@@ -1315,7 +1385,7 @@
                 lineStyle: 0,
                 priceLineVisible: false,
             });
-            const emaData = calculateEMA(ratioData, 20);
+            const emaData = calculateEMA(ratioData, periodEma);
             emaSeries.setData(emaData);
 
             wmaSeries = ratioChartInstance.addLineSeries({
@@ -1325,7 +1395,7 @@
                 lineStyle: 0,
                 priceLineVisible: false,
             });
-            const wmaData = calculateWMA(ratioData, 20);
+            const wmaData = calculateWMA(ratioData, periodWma);
             wmaSeries.setData(wmaData);
 
             bbBasisSeries = ratioChartInstance.addLineSeries({
@@ -1347,7 +1417,7 @@
                 lineWidth: 1,
                 priceLineVisible: false,
             });
-            const bbData = calculateBollingerBands(ratioData, 20, 2);
+            const bbData = calculateBollingerBands(ratioData, periodBbands, multBbands);
             bbBasisSeries.setData(bbData.map(d => ({ time: d.time, value: d.basis })));
             bbUpperSeries.setData(bbData.map(d => ({ time: d.time, value: d.upper })));
             bbLowerSeries.setData(bbData.map(d => ({ time: d.time, value: d.lower })));
@@ -1399,7 +1469,7 @@
                         formatter: val => val.toFixed(1),
                     },
                 });
-                const rsiData = calculateRSI(ratioData, 14);
+                const rsiData = calculateRSI(ratioData, periodRsi);
                 rsiSeries.setData(rsiData);
 
                 rsiSeries.createPriceLine({
@@ -1442,8 +1512,8 @@
                     priceLineVisible: false,
                 });
 
-                const macdData = calculateMACD(ratioData, 12, 26, 9);
-                const lineData = macdData.map(d => ({ time: d.time, value: d.value }));
+                const macdData = calculateMACD(ratioData, fastMacd, slowMacd, signalMacd);
+                const lineData = macdData.map(d => ({ time: d.time, value: d.macd }));
                 const signalData = macdData.map(d => ({ time: d.time, value: d.signal }));
                 const histData = macdData.map(d => ({
                     time: d.time,
@@ -1532,6 +1602,65 @@
             if (activeSymbolData && activeSymbolData.recent_changes) {
                 const risk = activeSymbolData.risk || { low_float: false };
                 createSymbolCharts(activeSymbolData.recent_changes, risk);
+            }
+        }
+
+        function recalculateAndRedrawIndicators() {
+            if (!activeSymbolData || !activeSymbolData.recent_changes || !ratioChartInstance) return;
+
+            const sortedData = [...activeSymbolData.recent_changes].reverse().map(item => {
+                const parsedDate = parseDateToISO(item.report_date);
+                return {
+                    time: parsedDate,
+                    ratio: item.ratio,
+                    shares: item.float_shares
+                };
+            }).filter(d => d.time);
+
+            if (sortedData.length === 0) return;
+            const ratioData = sortedData.map(d => ({ time: d.time, value: d.ratio }));
+
+            const periodSma = Math.max(2, parseInt(document.getElementById('periodSma').value, 10) || 20);
+            const periodEma = Math.max(2, parseInt(document.getElementById('periodEma').value, 10) || 20);
+            const periodWma = Math.max(2, parseInt(document.getElementById('periodWma').value, 10) || 20);
+            const periodBbands = Math.max(2, parseInt(document.getElementById('periodBbands').value, 10) || 20);
+            const multBbands = Math.max(0.1, parseFloat(document.getElementById('multBbands').value) || 2);
+            const periodRsi = Math.max(2, parseInt(document.getElementById('periodRsi').value, 10) || 14);
+            const fastMacd = Math.max(2, parseInt(document.getElementById('periodMacdFast').value, 10) || 12);
+            const slowMacd = Math.max(2, parseInt(document.getElementById('periodMacdSlow').value, 10) || 26);
+            const signalMacd = Math.max(2, parseInt(document.getElementById('periodMacdSignal').value, 10) || 9);
+
+            if (smaSeries) {
+                const smaData = calculateSMA(ratioData, periodSma);
+                smaSeries.setData(smaData);
+            }
+            if (emaSeries) {
+                const emaData = calculateEMA(ratioData, periodEma);
+                emaSeries.setData(emaData);
+            }
+            if (wmaSeries) {
+                const wmaData = calculateWMA(ratioData, periodWma);
+                wmaSeries.setData(wmaData);
+            }
+            if (bbBasisSeries && bbUpperSeries && bbLowerSeries) {
+                const bbData = calculateBollingerBands(ratioData, periodBbands, multBbands);
+                bbBasisSeries.setData(bbData.map(d => ({ time: d.time, value: d.basis })));
+                bbUpperSeries.setData(bbData.map(d => ({ time: d.time, value: d.upper })));
+                bbLowerSeries.setData(bbData.map(d => ({ time: d.time, value: d.lower })));
+            }
+            if (rsiSeries) {
+                const rsiData = calculateRSI(ratioData, periodRsi);
+                rsiSeries.setData(rsiData);
+            }
+            if (macdLineSeries && macdSignalSeries && macdHistSeries) {
+                const macdData = calculateMACD(ratioData, fastMacd, slowMacd, signalMacd);
+                macdLineSeries.setData(macdData.map(d => ({ time: d.time, value: d.macd })));
+                macdSignalSeries.setData(macdData.map(d => ({ time: d.time, value: d.signal })));
+                macdHistSeries.setData(macdData.map(d => ({
+                    time: d.time,
+                    value: d.histogram,
+                    color: d.histogram >= 0 ? 'rgba(38, 166, 154, 0.5)' : 'rgba(239, 83, 80, 0.5)'
+                })));
             }
         }
 
