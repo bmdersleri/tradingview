@@ -564,6 +564,18 @@ def create_app(store: freefloat_archive.ArchiveStore | None = None) -> FastAPI:
                             <label id="lblEma" style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer; user-select: none;">
                                 <input type="checkbox" id="toggleEma" checked onchange="updateSymbolCharts()" /> EMA 20 (Mor)
                             </label>
+                            <label id="lblWma" style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer; user-select: none;">
+                                <input type="checkbox" id="toggleWma" onchange="updateSymbolCharts()" /> WMA 20 (Mavi)
+                            </label>
+                            <label id="lblBbands" style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer; user-select: none;">
+                                <input type="checkbox" id="toggleBbands" onchange="updateSymbolCharts()" /> BBands (20, 2)
+                            </label>
+                            <label id="lblRsi" style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer; user-select: none;">
+                                <input type="checkbox" id="toggleRsi" onchange="toggleIndicatorPanes()" /> RSI 14
+                            </label>
+                            <label id="lblMacd" style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer; user-select: none;">
+                                <input type="checkbox" id="toggleMacd" onchange="toggleIndicatorPanes()" /> MACD
+                            </label>
                             <label id="lblThresholds" style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer; user-select: none;">
                                 <input type="checkbox" id="toggleThresholds" checked onchange="updateSymbolCharts()" /> Eşik Çizgileri (%10 & %20)
                             </label>
@@ -584,6 +596,8 @@ def create_app(store: freefloat_archive.ArchiveStore | None = None) -> FastAPI:
                     <!-- Chart Divs -->
                     <div id="ratioChartDiv" style="width: 100%; height: 320px; border-radius: 8px; overflow: hidden; border: 1px solid var(--border-color);"></div>
                     <div id="sharesChartDiv" style="width: 100%; height: 160px; border-radius: 8px; overflow: hidden; border: 1px solid var(--border-color);"></div>
+                    <div id="rsiChartDiv" style="width: 100%; height: 120px; border-radius: 8px; overflow: hidden; border: 1px solid var(--border-color); display: none;"></div>
+                    <div id="macdChartDiv" style="width: 100%; height: 120px; border-radius: 8px; overflow: hidden; border: 1px solid var(--border-color); display: none;"></div>
                 </div>
             </div>
 
@@ -728,6 +742,17 @@ def create_app(store: freefloat_archive.ArchiveStore | None = None) -> FastAPI:
         let areaSeries = null;
         let smaSeries = null;
         let emaSeries = null;
+        let wmaSeries = null;
+        let bbBasisSeries = null;
+        let bbUpperSeries = null;
+        let bbLowerSeries = null;
+        let rsiChartInstance = null;
+        let rsiSeries = null;
+        let macdChartInstance = null;
+        let macdLineSeries = null;
+        let macdSignalSeries = null;
+        let macdHistSeries = null;
+
         let thresholdLine10 = null;
         let thresholdLine20 = null;
         let sharesSeries = null;
@@ -777,6 +802,112 @@ def create_app(store: freefloat_archive.ArchiveStore | None = None) -> FastAPI:
             return ema;
         }
 
+        function calculateWMA(data, period) {
+            const wma = [];
+            const denom = (period * (period + 1)) / 2;
+            for (let i = 0; i < data.length; i++) {
+                if (i < period - 1) {
+                    wma.push({ time: data[i].time, value: data[i].value });
+                } else {
+                    let sum = 0;
+                    for (let j = 0; j < period; j++) {
+                        sum += data[i - j].value * (period - j);
+                    }
+                    wma.push({ time: data[i].time, value: sum / denom });
+                }
+            }
+            return wma;
+        }
+
+        function calculateBollingerBands(data, period, multiplier) {
+            const basis = calculateSMA(data, period);
+            const bands = [];
+            for (let i = 0; i < data.length; i++) {
+                if (i < period - 1) {
+                    bands.push({
+                        time: data[i].time,
+                        basis: data[i].value,
+                        upper: data[i].value,
+                        lower: data[i].value
+                    });
+                } else {
+                    let sum = 0;
+                    for (let j = i - period + 1; j <= i; j++) {
+                        sum += Math.pow(data[j].value - basis[i].value, 2);
+                    }
+                    const stdDev = Math.sqrt(sum / period);
+                    bands.push({
+                        time: data[i].time,
+                        basis: basis[i].value,
+                        upper: basis[i].value + multiplier * stdDev,
+                        lower: basis[i].value - multiplier * stdDev
+                    });
+                }
+            }
+            return bands;
+        }
+
+        function calculateRSI(data, period) {
+            const rsi = [];
+            if (data.length < 2) return rsi;
+
+            let avgGain = 0;
+            let avgLoss = 0;
+
+            for (let i = 1; i <= Math.min(period, data.length - 1); i++) {
+                const diff = data[i].value - data[i - 1].value;
+                if (diff > 0) avgGain += diff;
+                else avgLoss -= diff;
+            }
+            avgGain /= period;
+            avgLoss /= period;
+
+            const firstRsi = avgLoss === 0 ? 100 : (avgGain === 0 ? 0 : 100 - (100 / (1 + avgGain / avgLoss)));
+            rsi.push({ time: data[0].time, value: 50 });
+            for (let i = 1; i < Math.min(period + 1, data.length); i++) {
+                rsi.push({ time: data[i].time, value: firstRsi });
+            }
+
+            for (let i = period + 1; i < data.length; i++) {
+                const diff = data[i].value - data[i - 1].value;
+                const gain = diff > 0 ? diff : 0;
+                const loss = diff < 0 ? -diff : 0;
+
+                avgGain = (avgGain * (period - 1) + gain) / period;
+                avgLoss = (avgLoss * (period - 1) + loss) / period;
+
+                const val = avgLoss === 0 ? 100 : 100 - (100 / (1 + avgGain / avgLoss));
+                rsi.push({ time: data[i].time, value: val });
+            }
+            return rsi;
+        }
+
+        function calculateMACD(data, shortPeriod = 12, longPeriod = 26, signalPeriod = 9) {
+            const shortEma = calculateEMA(data, shortPeriod);
+            const longEma = calculateEMA(data, longPeriod);
+
+            const macdLine = [];
+            for (let i = 0; i < data.length; i++) {
+                macdLine.push({
+                    time: data[i].time,
+                    value: shortEma[i].value - longEma[i].value
+                });
+            }
+
+            const signalLine = calculateEMA(macdLine, signalPeriod);
+
+            const macd = [];
+            for (let i = 0; i < data.length; i++) {
+                macd.push({
+                    time: data[i].time,
+                    macd: macdLine[i].value,
+                    signal: signalLine[i].value,
+                    histogram: macdLine[i].value - signalLine[i].value
+                });
+            }
+            return macd;
+        }
+
         function createSymbolCharts(recentChanges, risk) {
             if (ratioChartInstance) {
                 ratioChartInstance.remove();
@@ -786,9 +917,27 @@ def create_app(store: freefloat_archive.ArchiveStore | None = None) -> FastAPI:
                 sharesChartInstance.remove();
                 sharesChartInstance = null;
             }
+            if (rsiChartInstance) {
+                rsiChartInstance.remove();
+                rsiChartInstance = null;
+            }
+            if (macdChartInstance) {
+                macdChartInstance.remove();
+                macdChartInstance = null;
+            }
+            wmaSeries = null;
+            bbBasisSeries = null;
+            bbUpperSeries = null;
+            bbLowerSeries = null;
+            rsiSeries = null;
+            macdLineSeries = null;
+            macdSignalSeries = null;
+            macdHistSeries = null;
 
             const ratioContainer = document.getElementById('ratioChartDiv');
             const sharesContainer = document.getElementById('sharesChartDiv');
+            const rsiContainer = document.getElementById('rsiChartDiv');
+            const macdContainer = document.getElementById('macdChartDiv');
 
             const sortedData = [...recentChanges].reverse().map(item => {
                 const parsedDate = parseDateToISO(item.report_date);
@@ -861,6 +1010,36 @@ def create_app(store: freefloat_archive.ArchiveStore | None = None) -> FastAPI:
             const emaData = calculateEMA(ratioData, 20);
             emaSeries.setData(emaData);
 
+            wmaSeries = ratioChartInstance.addLineSeries({
+                color: '#00b0ff',
+                lineWidth: 1.5,
+                lineStyle: 0,
+                priceLineVisible: false,
+            });
+            const wmaData = calculateWMA(ratioData, 20);
+            wmaSeries.setData(wmaData);
+
+            bbBasisSeries = ratioChartInstance.addLineSeries({
+                color: 'rgba(255, 255, 255, 0.3)',
+                lineWidth: 1,
+                lineStyle: 2,
+                priceLineVisible: false,
+            });
+            bbUpperSeries = ratioChartInstance.addLineSeries({
+                color: 'rgba(41, 182, 246, 0.6)',
+                lineWidth: 1,
+                priceLineVisible: false,
+            });
+            bbLowerSeries = ratioChartInstance.addLineSeries({
+                color: 'rgba(41, 182, 246, 0.6)',
+                lineWidth: 1,
+                priceLineVisible: false,
+            });
+            const bbData = calculateBollingerBands(ratioData, 20, 2);
+            bbBasisSeries.setData(bbData.map(d => ({ time: d.time, value: d.basis })));
+            bbUpperSeries.setData(bbData.map(d => ({ time: d.time, value: d.upper })));
+            bbLowerSeries.setData(bbData.map(d => ({ time: d.time, value: d.lower })));
+
             thresholdLine10 = {
                 price: 10.0,
                 color: '#ef5350',
@@ -892,11 +1071,94 @@ def create_app(store: freefloat_archive.ArchiveStore | None = None) -> FastAPI:
             });
             sharesSeries.setData(sharesData);
 
-            ratioChartInstance.timeScale().subscribeVisibleTimeRangeChange(range => {
-                sharesChartInstance.timeScale().setVisibleRange(range);
-            });
-            sharesChartInstance.timeScale().subscribeVisibleTimeRangeChange(range => {
-                ratioChartInstance.timeScale().setVisibleRange(range);
+            const showRsi = document.getElementById('toggleRsi').checked;
+            if (showRsi) {
+                rsiContainer.style.display = 'block';
+                rsiChartInstance = LightweightCharts.createChart(rsiContainer, {
+                    ...chartOptions,
+                    width: rsiContainer.clientWidth || 800,
+                    height: 120,
+                });
+                rsiSeries = rsiChartInstance.addLineSeries({
+                    color: '#ab47bc',
+                    lineWidth: 1.5,
+                    priceFormat: {
+                        type: 'custom',
+                        formatter: val => val.toFixed(1),
+                    },
+                });
+                const rsiData = calculateRSI(ratioData, 14);
+                rsiSeries.setData(rsiData);
+
+                rsiSeries.createPriceLine({
+                    price: 70.0,
+                    color: 'rgba(239, 83, 80, 0.4)',
+                    lineWidth: 1,
+                    lineStyle: 3,
+                    axisLabelVisible: true,
+                });
+                rsiSeries.createPriceLine({
+                    price: 30.0,
+                    color: 'rgba(38, 166, 154, 0.4)',
+                    lineWidth: 1,
+                    lineStyle: 3,
+                    axisLabelVisible: true,
+                });
+            } else {
+                rsiContainer.style.display = 'none';
+            }
+
+            const showMacd = document.getElementById('toggleMacd').checked;
+            if (showMacd) {
+                macdContainer.style.display = 'block';
+                macdChartInstance = LightweightCharts.createChart(macdContainer, {
+                    ...chartOptions,
+                    width: macdContainer.clientWidth || 800,
+                    height: 120,
+                });
+                macdLineSeries = macdChartInstance.addLineSeries({
+                    color: '#29b6f6',
+                    lineWidth: 1.5,
+                    priceLineVisible: false,
+                });
+                macdSignalSeries = macdChartInstance.addLineSeries({
+                    color: '#ff7043',
+                    lineWidth: 1.5,
+                    priceLineVisible: false,
+                });
+                macdHistSeries = macdChartInstance.addHistogramSeries({
+                    priceLineVisible: false,
+                });
+
+                const macdData = calculateMACD(ratioData, 12, 26, 9);
+                const lineData = macdData.map(d => ({ time: d.time, value: d.value }));
+                const signalData = macdData.map(d => ({ time: d.time, value: d.signal }));
+                const histData = macdData.map(d => ({
+                    time: d.time,
+                    value: d.histogram,
+                    color: d.histogram >= 0 ? 'rgba(38, 166, 154, 0.5)' : 'rgba(239, 83, 80, 0.5)'
+                }));
+
+                macdLineSeries.setData(lineData);
+                macdSignalSeries.setData(signalData);
+                macdHistSeries.setData(histData);
+            } else {
+                macdContainer.style.display = 'none';
+            }
+
+            // Sync timelines of all active charts
+            const activeCharts = [ratioChartInstance, sharesChartInstance];
+            if (rsiChartInstance) activeCharts.push(rsiChartInstance);
+            if (macdChartInstance) activeCharts.push(macdChartInstance);
+
+            activeCharts.forEach(chart => {
+                chart.timeScale().subscribeVisibleTimeRangeChange(range => {
+                    activeCharts.forEach(otherChart => {
+                        if (otherChart !== chart) {
+                            otherChart.timeScale().setVisibleRange(range);
+                        }
+                    });
+                });
             });
 
             updateSymbolCharts();
@@ -908,10 +1170,17 @@ def create_app(store: freefloat_archive.ArchiveStore | None = None) -> FastAPI:
 
             const showSma = document.getElementById('toggleSma').checked;
             const showEma = document.getElementById('toggleEma').checked;
+            const showWma = document.getElementById('toggleWma').checked;
+            const showBbands = document.getElementById('toggleBbands').checked;
             const showThresholds = document.getElementById('toggleThresholds').checked;
 
             if (smaSeries) smaSeries.applyOptions({ visible: showSma });
             if (emaSeries) emaSeries.applyOptions({ visible: showEma });
+            if (wmaSeries) wmaSeries.applyOptions({ visible: showWma });
+
+            if (bbBasisSeries) bbBasisSeries.applyOptions({ visible: showBbands });
+            if (bbUpperSeries) bbUpperSeries.applyOptions({ visible: showBbands });
+            if (bbLowerSeries) bbLowerSeries.applyOptions({ visible: showBbands });
 
             if (activeLine10) {
                 areaSeries.removePriceLine(activeLine10);
@@ -925,6 +1194,19 @@ def create_app(store: freefloat_archive.ArchiveStore | None = None) -> FastAPI:
             if (showThresholds) {
                 activeLine10 = areaSeries.createPriceLine(thresholdLine10);
                 activeLine20 = areaSeries.createPriceLine(thresholdLine20);
+            }
+        }
+
+        function toggleIndicatorPanes() {
+            const showRsi = document.getElementById('toggleRsi').checked;
+            const showMacd = document.getElementById('toggleMacd').checked;
+
+            document.getElementById('rsiChartDiv').style.display = showRsi ? 'block' : 'none';
+            document.getElementById('macdChartDiv').style.display = showMacd ? 'block' : 'none';
+
+            if (activeSymbolData && activeSymbolData.recent_changes) {
+                const risk = activeSymbolData.risk || { low_float: false };
+                createSymbolCharts(activeSymbolData.recent_changes, risk);
             }
         }
 
