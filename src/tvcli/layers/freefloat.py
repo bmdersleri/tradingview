@@ -332,6 +332,52 @@ def lookup(
     return None
 
 
+# Free-float liquidity buckets, by ratio (%). Reused from the archive's risk
+# thresholds so the CLI tells one story about what "thin" means.
+_LOW_FLOAT_PCT = 20.0
+_SEVERE_LOW_FLOAT_PCT = 10.0
+# A conservative single-order participation cap against the tradable free-float
+# market cap. 1% is a rule-of-thumb ceiling to avoid moving a thin name; this is
+# guidance, not a guarantee of fillable size.
+_SAFE_PARTICIPATION = 0.01
+
+
+def liquidity_score(
+    record: FloatRecord, last_price: float | None = None
+) -> dict[str, Any]:
+    """Liquidity read for one symbol: bucket + tradable cap + position-size hint.
+
+    ``free_float_cap`` is the free-floating market value (float_shares × price),
+    i.e. the shares actually available to trade — not total market cap. The
+    ``max_order_hint`` is a conservative 1%-of-free-float ceiling for a single
+    order, returned only when a price is supplied. Pure math, no I/O, so both the
+    report command and the dashboard can reuse it.
+    """
+    ratio = record.ratio
+    if ratio < _SEVERE_LOW_FLOAT_PCT:
+        bucket = "severe"
+    elif ratio < _LOW_FLOAT_PCT:
+        bucket = "thin"
+    else:
+        bucket = "deep"
+    free_cap: float | None = None
+    max_order_hint: float | None = None
+    if last_price is not None and last_price > 0:
+        free_cap = record.float_shares * last_price
+        max_order_hint = round(free_cap * _SAFE_PARTICIPATION, 2)
+    return {
+        "ratio": ratio,
+        "bucket": bucket,
+        "low_float": ratio < _LOW_FLOAT_PCT,
+        "severe_low_float": ratio < _SEVERE_LOW_FLOAT_PCT,
+        "float_shares": record.float_shares,
+        "last_price": last_price,
+        "free_float_cap": None if free_cap is None else round(free_cap, 2),
+        "max_order_hint": max_order_hint,
+        "max_participation_pct": _SAFE_PARTICIPATION * 100.0,
+    }
+
+
 def build_float_payload(
     records: tuple[FloatRecord, ...],
     *,

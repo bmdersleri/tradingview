@@ -76,6 +76,43 @@ def test_build_symbol_report_requires_sync(tmp_path: Path) -> None:
         store.build_symbol_report("THYAO")
 
 
+def test_flat_ratio_emits_no_extrema_events(tmp_path: Path) -> None:
+    # A constant ratio across reports must not spam a new_52w_high + new_52w_low
+    # pair on every report (the old `>=max`/`<=min` over a window that included
+    # the current point did exactly that). The low-float risk event still fires.
+    store = ArchiveStore(tmp_path / "archive.sqlite3")
+    for day in (9, 10, 11):
+        store.sync_records(
+            (_record("ENPRA", 0.12, label=f"{day:02d}.06.2026", float_shares=120.0),)
+        )
+
+    events = store.symbol_events("ENPRA", limit=100)
+    types = {e["event_type"] for e in events}
+    assert "new_52w_high_ratio" not in types
+    assert "new_52w_low_ratio" not in types
+    assert "liquidity_risk_low_float" in types
+
+
+def test_new_high_is_strict_and_exclusive(tmp_path: Path) -> None:
+    # A strictly rising series sets a new high on each later report and never a
+    # low on the same date; high and low are mutually exclusive.
+    store = ArchiveStore(tmp_path / "archive.sqlite3")
+    store.sync_records((_record("AAA", 30.0, label="09.06.2026", float_shares=300.0),))
+    store.sync_records((_record("AAA", 35.0, label="10.06.2026", float_shares=350.0),))
+    store.sync_records((_record("AAA", 40.0, label="11.06.2026", float_shares=400.0),))
+
+    by_date: dict[str, set[str]] = {}
+    for event in store.symbol_events("AAA", limit=100):
+        by_date.setdefault(str(event["report_date"]), set()).add(
+            str(event["event_type"])
+        )
+    # First report: no prior window => no extrema event at all.
+    assert "new_52w_high_ratio" not in by_date.get("2026-06-09", set())
+    # Later reports: a new high, never paired with a low.
+    assert "new_52w_high_ratio" in by_date["2026-06-11"]
+    assert "new_52w_low_ratio" not in by_date["2026-06-11"]
+
+
 def test_latest_risk_events_returns_latest_report_events(tmp_path: Path) -> None:
     store = ArchiveStore(tmp_path / "archive.sqlite3")
     # A sharp ratio drop across two reports => a high-severity ratio_jump_down at
@@ -97,6 +134,45 @@ def test_latest_risk_events_returns_latest_report_events(tmp_path: Path) -> None
 def test_latest_risk_events_unknown_symbol_is_empty(tmp_path: Path) -> None:
     store = ArchiveStore(tmp_path / "archive.sqlite3")
     assert store.latest_risk_events("NOPE") == []
+
+
+def test_ratio_percentile_ranks_within_report(tmp_path: Path) -> None:
+    store = ArchiveStore(tmp_path / "archive.sqlite3")
+    store.sync_records(
+        (
+            _record("AAA", 5.0, label="11.06.2026", float_shares=50.0),
+            _record("BBB", 30.0, label="11.06.2026", float_shares=300.0),
+            _record("CCC", 60.0, label="11.06.2026", float_shares=600.0),
+        )
+    )
+
+    low = store.ratio_percentile("AAA")
+    assert low["rank"] == 1  # thinnest float ranks first
+    assert low["total"] == 3
+    assert low["lower_count"] == 0
+    mid = store.ratio_percentile("BBB")
+    assert mid["rank"] == 2
+    assert mid["lower_count"] == 1
+
+    with pytest.raises(NotFoundError):
+        store.ratio_percentile("NOPE")
+
+
+def test_build_symbol_report_carries_percentile_and_liquidity(tmp_path: Path) -> None:
+    store = ArchiveStore(tmp_path / "archive.sqlite3")
+    store.sync_records(
+        (
+            _record("ENPRA", 8.0, label="11.06.2026", float_shares=80.0),
+            _record("THYAO", 50.0, label="11.06.2026", float_shares=500.0),
+        )
+    )
+    report = store.build_symbol_report("ENPRA")
+    assert report["percentile"]["rank"] == 1
+    assert report["percentile"]["total"] == 2
+    assert report["liquidity"]["bucket"] == "severe"
+    assert report["liquidity"]["low_float"] is True
+    # No price supplied at the report layer => cap/order hint stay null.
+    assert report["liquidity"]["free_float_cap"] is None
 
 
 def test_sync_archive_range_walks_full_window(monkeypatch, tmp_path: Path) -> None:

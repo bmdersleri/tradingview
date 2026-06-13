@@ -456,29 +456,37 @@ class ArchiveStore:
                     "payload": {"ratio": ratio},
                 }
             )
-        recent = [
+        # Compare against everything STRICTLY BEFORE this report, so a "new
+        # extreme" means the ratio broke past every prior value — not merely
+        # equalled itself. The earlier `ratio >= max` / `ratio <= min` over a
+        # window that *included* the current point fired both branches at once
+        # whenever the series was flat (max == min == ratio), spamming a
+        # high+low pair on every report (e.g. ENPRA's constant 0.122%). The
+        # strict `>`/`<` plus `elif` make the two mutually exclusive, and an
+        # empty prior window (first-ever observation) emits neither.
+        prior = [
             float(row["ratio"])
             for row in rows
-            if row["report_date"] <= current["report_date"]
+            if row["report_date"] < current["report_date"]
         ][-_EXTREME_LOOKBACK:]
-        if ratio >= max(recent):
+        if prior and ratio > max(prior):
             events.append(
                 {
                     "event_type": "new_52w_high_ratio",
                     "severity": "medium",
                     "metric_value": ratio,
-                    "threshold_value": max(recent),
-                    "payload": {"ratio": ratio, "window": len(recent)},
+                    "threshold_value": max(prior),
+                    "payload": {"ratio": ratio, "window": len(prior)},
                 }
             )
-        if ratio <= min(recent):
+        elif prior and ratio < min(prior):
             events.append(
                 {
                     "event_type": "new_52w_low_ratio",
                     "severity": "medium",
                     "metric_value": ratio,
-                    "threshold_value": min(recent),
-                    "payload": {"ratio": ratio, "window": len(recent)},
+                    "threshold_value": min(prior),
+                    "payload": {"ratio": ratio, "window": len(prior)},
                 }
             )
         if previous is None:
@@ -799,6 +807,61 @@ class ArchiveStore:
             events.append(event)
         return events
 
+    def ratio_percentile(
+        self, code: str, report_date: date | None = None
+    ) -> dict[str, Any]:
+        """Where a symbol's free-float ratio ranks among all symbols on one report.
+
+        A raw ratio (e.g. 0.12%) is meaningless without peers; this places it in
+        the cross-section of every symbol present on the same report. ``rank`` is
+        1-based ascending (1 = lowest float = thinnest), ``percentile`` is the
+        fraction of symbols at or below this ratio (0..100).
+        """
+        normalized = freefloat.normalize_code(code)
+        with self._connect() as conn:
+            if report_date is None:
+                row = conn.execute(
+                    """
+                    SELECT report_date, ratio FROM freefloat_snapshots
+                    WHERE code = ? ORDER BY report_date DESC LIMIT 1
+                    """,
+                    (normalized,),
+                ).fetchone()
+            else:
+                row = conn.execute(
+                    "SELECT report_date, ratio FROM freefloat_snapshots "
+                    "WHERE code = ? AND report_date = ?",
+                    (normalized, _iso_day(report_date)),
+                ).fetchone()
+            if row is None:
+                raise NotFoundError(
+                    f"No archived free-float snapshot for '{normalized}'.",
+                    hint="Run `tvcli data float-sync` first.",
+                )
+            day = str(row["report_date"])
+            ratio = float(row["ratio"])
+            agg = conn.execute(
+                """
+                SELECT
+                    COUNT(*) AS total,
+                    SUM(CASE WHEN ratio < ? THEN 1 ELSE 0 END) AS lower,
+                    SUM(CASE WHEN ratio <= ? THEN 1 ELSE 0 END) AS at_or_below
+                FROM freefloat_snapshots WHERE report_date = ?
+                """,
+                (ratio, ratio, day),
+            ).fetchone()
+        total = int(agg["total"])
+        lower = int(agg["lower"] or 0)
+        at_or_below = int(agg["at_or_below"] or 0)
+        return {
+            "report_date": day,
+            "ratio": ratio,
+            "rank": lower + 1,  # 1-based ascending; 1 = thinnest float
+            "total": total,
+            "lower_count": lower,
+            "percentile": round(100.0 * at_or_below / total, 2) if total else None,
+        }
+
     def build_symbol_report(self, symbol: str, *, limit: int = 20) -> dict[str, Any]:
         code = freefloat.normalize_code(symbol)
         with self._connect() as conn:
@@ -882,6 +945,18 @@ class ArchiveStore:
                     else None
                 ),
             },
+            "percentile": self.ratio_percentile(code),
+            "liquidity": freefloat.liquidity_score(
+                freefloat.FloatRecord(
+                    code=str(latest["code"]),
+                    isin=str(latest["isin"]),
+                    name=str(latest["name"]),
+                    float_shares=float(latest["float_shares"]),
+                    capital=float(latest["capital"]),
+                    ratio=float(latest["ratio"]),
+                    date=str(latest["report_date"]),
+                )
+            ),
         }
 
 
