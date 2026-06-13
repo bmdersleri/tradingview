@@ -21,27 +21,38 @@ class CacheStats:
 
 
 class SQLiteTTLCache:
+    _initialized_paths: set[str] = set()
+
     def __init__(self, path: Path, clock: Callable[[], float] = time.time) -> None:
         self.path = path
         self.clock = clock
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        with closing(self._connect()):
-            pass
+
+        path_str = str(self.path.resolve())
+        if path_str not in SQLiteTTLCache._initialized_paths:
+            self._ensure_schema()
+            SQLiteTTLCache._initialized_paths.add(path_str)
 
     def _connect(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(self.path)
+        conn = sqlite3.connect(self.path, timeout=10.0)
         conn.row_factory = sqlite3.Row
-        conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS cache (
-                key TEXT PRIMARY KEY,
-                value TEXT NOT NULL,
-                expires_at REAL NOT NULL,
-                hits INTEGER NOT NULL DEFAULT 0
-            )
-            """
-        )
+        conn.execute("PRAGMA journal_mode=WAL;")
+        conn.execute("PRAGMA synchronous=NORMAL;")
         return conn
+
+    def _ensure_schema(self) -> None:
+        with closing(self._connect()) as conn:
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS cache (
+                    key TEXT PRIMARY KEY,
+                    value TEXT NOT NULL,
+                    expires_at REAL NOT NULL,
+                    hits INTEGER NOT NULL DEFAULT 0
+                )
+                """
+            )
+            conn.commit()
 
     def set(self, key: str, value: Any, ttl_seconds: int) -> None:
         expires_at = self.clock() + ttl_seconds

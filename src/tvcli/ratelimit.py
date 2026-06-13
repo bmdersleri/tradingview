@@ -17,6 +17,8 @@ class BucketState:
 
 
 class SQLiteTokenBucket:
+    _initialized_paths: set[str] = set()
+
     def __init__(
         self,
         path: Path,
@@ -30,22 +32,31 @@ class SQLiteTokenBucket:
         self.refill_per_second = refill_per_second
         self.clock = clock
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        with closing(self._connect()):
-            pass
+
+        path_str = str(self.path.resolve())
+        if path_str not in SQLiteTokenBucket._initialized_paths:
+            self._ensure_schema()
+            SQLiteTokenBucket._initialized_paths.add(path_str)
 
     def _connect(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(self.path)
+        conn = sqlite3.connect(self.path, timeout=10.0)
         conn.row_factory = sqlite3.Row
-        conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS tokens (
-                bucket TEXT PRIMARY KEY,
-                tokens REAL NOT NULL,
-                updated_at REAL NOT NULL
-            )
-            """
-        )
+        conn.execute("PRAGMA journal_mode=WAL;")
+        conn.execute("PRAGMA synchronous=NORMAL;")
         return conn
+
+    def _ensure_schema(self) -> None:
+        with closing(self._connect()) as conn:
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS tokens (
+                    bucket TEXT PRIMARY KEY,
+                    tokens REAL NOT NULL,
+                    updated_at REAL NOT NULL
+                )
+                """
+            )
+            conn.commit()
 
     def _load(self, conn: sqlite3.Connection, bucket: str) -> BucketState:
         row = conn.execute(

@@ -72,6 +72,8 @@ def _trend_direction(values: list[float]) -> str:
 
 
 class ArchiveStore:
+    _initialized_paths: set[str] = set()
+
     def __init__(
         self,
         path: Path | None = None,
@@ -81,7 +83,11 @@ class ArchiveStore:
         self.path = path or default_archive_path()
         self._clock = clock or (lambda: datetime.now(tz=UTC))
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        self._ensure_schema()
+
+        path_str = str(self.path.resolve())
+        if path_str not in ArchiveStore._initialized_paths:
+            self._ensure_schema()
+            ArchiveStore._initialized_paths.add(path_str)
 
     def _now(self) -> datetime:
         current = self._clock()
@@ -99,8 +105,10 @@ class ArchiveStore:
         sqlite3's own ``with conn`` only manages the transaction, leaving the
         connection open (ResourceWarning). This wraps both concerns.
         """
-        conn = sqlite3.connect(self.path)
+        conn = sqlite3.connect(self.path, timeout=10.0)
         conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA journal_mode=WAL;")
+        conn.execute("PRAGMA synchronous=NORMAL;")
         try:
             yield conn
             conn.commit()
