@@ -60,3 +60,39 @@ async def get_symbol_kap(code: str, store: ArchiveStore = Depends(get_store)) ->
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=str(e),
         ) from e
+
+
+@router.get("/{code}/ohlcv")
+async def get_symbol_ohlcv(
+    code: str,
+    interval: str = "1d",
+    bars: int = 250,
+) -> Any:
+    try:
+        from ...layers import ohlcv
+        from ...logging_utils import setup_logger
+
+        symbol_code = code.upper()
+        if ":" not in symbol_code:
+            symbol_code = f"BIST:{symbol_code}"
+
+        req = ohlcv.OhlcvRequest(symbol=symbol_code, interval=interval, bars=bars)
+        bars_data = ohlcv.fetch_history(req)
+
+        return [
+            {
+                "time": bar.time,
+                "open": bar.open,
+                "high": bar.high,
+                "low": bar.low,
+                "close": bar.close,
+                "volume": bar.volume,
+            }
+            for bar in bars_data
+        ]
+    except Exception as e:
+        from ...logging_utils import setup_logger
+
+        logger = setup_logger("tvcli.floatdash.symbol")
+        logger.warning(f"Failed to fetch OHLCV for {code}: {str(e)}")
+        return []

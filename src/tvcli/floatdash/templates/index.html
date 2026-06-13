@@ -1120,7 +1120,7 @@
             return macd;
         }
 
-        function createSymbolCharts(recentChanges, risk) {
+        function createSymbolCharts(recentChanges, risk, ohlcvData = []) {
             if (ratioChartInstance) {
                 ratioChartInstance.remove();
                 ratioChartInstance = null;
@@ -1177,6 +1177,11 @@
                 },
                 rightPriceScale: {
                     borderColor: 'rgba(42, 46, 57, 0.3)',
+                    visible: true,
+                },
+                leftPriceScale: {
+                    borderColor: 'rgba(42, 46, 57, 0.3)',
+                    visible: true,
                 },
                 timeScale: {
                     borderColor: 'rgba(42, 46, 57, 0.3)',
@@ -1189,10 +1194,37 @@
                 height: 320,
             });
 
+            // Plot stock price (OHLCV) on the RIGHT price scale if data is available
+            if (ohlcvData && ohlcvData.length > 0) {
+                const formattedOhlcv = ohlcvData.map(bar => {
+                    const d = new Date(bar.time * 1000);
+                    const isoString = d.toISOString().split('T')[0];
+                    return {
+                        time: isoString,
+                        open: bar.open,
+                        high: bar.high,
+                        low: bar.low,
+                        close: bar.close
+                    };
+                });
+                
+                const candlestickSeries = ratioChartInstance.addCandlestickSeries({
+                    priceScaleId: 'right',
+                    upColor: '#26a69a',
+                    downColor: '#ef5350',
+                    borderVisible: false,
+                    wickUpColor: '#26a69a',
+                    wickDownColor: '#ef5350',
+                });
+                candlestickSeries.setData(formattedOhlcv);
+            }
+
             const lineColor = risk.low_float ? '#ef5350' : '#26a69a';
             const areaColor = risk.low_float ? 'rgba(239, 83, 80, 0.15)' : 'rgba(38, 166, 154, 0.15)';
 
+            // Plot free float ratio on the LEFT price scale
             areaSeries = ratioChartInstance.addAreaSeries({
+                priceScaleId: 'left',
                 lineColor: lineColor,
                 topColor: areaColor,
                 bottomColor: 'rgba(15, 17, 26, 0.0)',
@@ -1204,21 +1236,70 @@
             });
             areaSeries.setData(ratioData);
 
-            // Seed KAP timeline markers
+            // Combine KAP and free-float events as markers on the area series
+            let allMarkers = [];
             if (activeKapDisclosures && activeKapDisclosures.length > 0) {
-                const markers = activeKapDisclosures.map(disclosure => ({
-                    time: parseDateToISO(disclosure.disclosure_date),
-                    position: 'aboveBar',
-                    color: '#ffaa00',
-                    shape: 'pin',
-                    text: 'KAP',
-                    id: `kap_${disclosure.id}`
-                })).filter(m => m.time);
-                markers.sort((a, b) => a.time.localeCompare(b.time));
-                areaSeries.setMarkers(markers);
+                activeKapDisclosures.forEach(disclosure => {
+                    const t = parseDateToISO(disclosure.disclosure_date);
+                    if (t) {
+                        allMarkers.push({
+                            time: t,
+                            position: 'aboveBar',
+                            color: '#ffaa00',
+                            shape: 'pin',
+                            text: 'KAP',
+                            id: `kap_${disclosure.id}`
+                        });
+                    }
+                });
             }
 
+            if (activeSymbolData && activeSymbolData.events && activeSymbolData.events.length > 0) {
+                activeSymbolData.events.forEach(evt => {
+                    const t = parseDateToISO(evt.report_date);
+                    if (t) {
+                        let shape = 'circle';
+                        let color = 'var(--warning)';
+                        let text = 'Olay';
+                        
+                        if (evt.event_type.includes('jump_up') || evt.event_type.includes('cross_up')) {
+                            shape = 'arrowUp';
+                            color = 'var(--bullish)';
+                            text = '▲ ORAN';
+                        } else if (evt.event_type.includes('jump_down') || evt.event_type.includes('cross_down')) {
+                            shape = 'arrowDown';
+                            color = 'var(--bearish)';
+                            text = '▼ ORAN';
+                        } else if (evt.event_type.includes('capital_change')) {
+                            shape = 'square';
+                            color = '#9c27b0';
+                            text = 'SERMAYE';
+                        }
+                        
+                        if (evt.severity === 'high') {
+                            color = 'var(--bearish)';
+                        }
+                        
+                        allMarkers.push({
+                            time: t,
+                            position: 'belowBar',
+                            color: color,
+                            shape: shape,
+                            text: text,
+                            id: `event_${evt.id || Math.random()}`
+                        });
+                    }
+                });
+            }
+
+            if (allMarkers.length > 0) {
+                allMarkers.sort((a, b) => a.time.localeCompare(b.time));
+                areaSeries.setMarkers(allMarkers);
+            }
+
+            // Map all indicators to the LEFT price scale as they measure free float %
             smaSeries = ratioChartInstance.addLineSeries({
+                priceScaleId: 'left',
                 color: '#ffaa00',
                 lineWidth: 1.5,
                 lineStyle: 2,
@@ -1228,6 +1309,7 @@
             smaSeries.setData(smaData);
 
             emaSeries = ratioChartInstance.addLineSeries({
+                priceScaleId: 'left',
                 color: '#9c27b0',
                 lineWidth: 1.5,
                 lineStyle: 0,
@@ -1237,6 +1319,7 @@
             emaSeries.setData(emaData);
 
             wmaSeries = ratioChartInstance.addLineSeries({
+                priceScaleId: 'left',
                 color: '#00b0ff',
                 lineWidth: 1.5,
                 lineStyle: 0,
@@ -1246,17 +1329,20 @@
             wmaSeries.setData(wmaData);
 
             bbBasisSeries = ratioChartInstance.addLineSeries({
+                priceScaleId: 'left',
                 color: 'rgba(255, 255, 255, 0.3)',
                 lineWidth: 1,
                 lineStyle: 2,
                 priceLineVisible: false,
             });
             bbUpperSeries = ratioChartInstance.addLineSeries({
+                priceScaleId: 'left',
                 color: 'rgba(41, 182, 246, 0.6)',
                 lineWidth: 1,
                 priceLineVisible: false,
             });
             bbLowerSeries = ratioChartInstance.addLineSeries({
+                priceScaleId: 'left',
                 color: 'rgba(41, 182, 246, 0.6)',
                 lineWidth: 1,
                 priceLineVisible: false,
@@ -1856,9 +1942,10 @@
             showLoader(`Generating Deep-Dive for ${activeCode}...`);
 
             try {
-                const [symResponse, kapResponse] = await Promise.all([
+                const [symResponse, kapResponse, ohlcvResponse] = await Promise.all([
                     fetch(`/api/symbol/${activeCode}`),
-                    fetch(`/api/symbol/${activeCode}/kap`)
+                    fetch(`/api/symbol/${activeCode}/kap`),
+                    fetch(`/api/symbol/${activeCode}/ohlcv`)
                 ]);
 
                 if (!symResponse.ok) {
@@ -1869,6 +1956,7 @@
                 const data = await symResponse.json();
                 activeSymbolData = data;
                 activeKapDisclosures = kapResponse.ok ? await kapResponse.json() : [];
+                const ohlcvData = ohlcvResponse.ok ? await ohlcvResponse.json() : [];
 
                 document.getElementById('infoSymbol').innerText = `${data.identity.code} / ${data.identity.name}`;
                 document.getElementById('infoRatio').innerText = `${data.latest.ratio.toFixed(2)}%`;
@@ -1913,7 +2001,7 @@
                 }
 
                 hideLoader();
-                createSymbolCharts(data.recent_changes, risk);
+                createSymbolCharts(data.recent_changes, risk, ohlcvData);
 
             } catch (err) {
                 hideLoader();
