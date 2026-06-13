@@ -84,3 +84,57 @@ def test_webhook_telegram_dispatch(tmp_path: Path) -> None:
     assert alerts_path.exists()
     assert client.requests[0][0] == "https://api.telegram.org/botbot-token/sendMessage"
     assert "TradingView alert" in client.requests[0][1]["text"]
+
+
+def test_dashboard_routes(tmp_path: Path) -> None:
+    from unittest.mock import patch
+
+    app = create_app(secret="secret", sink="file")
+
+    async def run_requests() -> tuple[httpx.Response, ...]:
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app),
+            base_url="http://testserver",
+        ) as client:
+            with patch("tvcli.layers.float_dashboard.run_dashboard") as mock_run:
+
+                def fake_run(req: any) -> None:
+                    req.out.write_bytes(b"fake png content")
+
+                mock_run.side_effect = fake_run
+
+                return (
+                    await client.get("/dashboard"),
+                    await client.get("/dashboard/market"),
+                    await client.get("/dashboard/symbol/THYAO"),
+                )
+
+    html_resp, market_resp, symbol_resp = anyio.run(run_requests)
+
+    assert html_resp.status_code == 200
+    assert "TVCLI Free-Float Analytics" in html_resp.text
+    assert market_resp.status_code == 200
+    assert market_resp.content == b"fake png content"
+    assert symbol_resp.status_code == 200
+    assert symbol_resp.content == b"fake png content"
+
+
+def test_dashboard_routes_error(tmp_path: Path) -> None:
+    from unittest.mock import patch
+
+    app = create_app(secret="secret", sink="file")
+
+    async def run_requests() -> tuple[httpx.Response, ...]:
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app),
+            base_url="http://testserver",
+        ) as client:
+            with patch("tvcli.layers.float_dashboard.run_dashboard") as mock_run:
+                from tvcli.errors import NotFoundError
+
+                mock_run.side_effect = NotFoundError("Symbol not found")
+
+                return (await client.get("/dashboard/symbol/INVALID"),)
+
+    err_resp = anyio.run(run_requests)[0]
+    assert err_resp.status_code == 404
