@@ -15,8 +15,10 @@ from pathlib import Path
 from statistics import fmean, pstdev
 from typing import Any
 
-from ..config import default_archive_path
+from ..cache import SQLiteTTLCache
+from ..config import default_archive_path, default_cache_path
 from ..errors import NotFoundError, RateLimitedError, UsageError
+from ..ratelimit import SQLiteTokenBucket
 from . import freefloat
 
 _SOURCE = "VAP / MKK"
@@ -957,6 +959,21 @@ def sync_archive(
     # One cooldown claim per backfill session (not per day); inside the session a
     # gentle inter-request throttle keeps us polite while staying resumable.
     claim = store.claim_sync_slot(_SYNC_SOURCE_VAP)
+
+    # A backfill walks hundreds of days at its own ``--rate-seconds`` pace, so it
+    # must NOT ride the interactive 5-per-10-minute bucket that guards ad-hoc
+    # `data float` lookups — that bucket would starve after 5 fetches and abort
+    # the whole run. Give the backfill its own bucket whose refill matches the
+    # request cadence (one token per ``rate_seconds``), with headroom so the
+    # paced loop never trips it. ``_sleep`` remains the real throttle.
+    cache = SQLiteTTLCache(default_cache_path())
+    backfill_throttle = SQLiteTokenBucket(
+        default_cache_path(),
+        capacity=max(8.0, rate_seconds),
+        refill_per_second=(1.0 / rate_seconds) if rate_seconds > 0 else 1.0,
+        clock=lambda: store._now().timestamp(),
+    )
+
     attempted = False
     last_report_date: str | None = None
     fetched_in_session = 0
@@ -972,7 +989,9 @@ def sync_archive(
                 _sleep(rate_seconds)
             attempted = True
             try:
-                records = freefloat.fetch_report(candidate)
+                records = freefloat.fetch_report(
+                    candidate, cache=cache, throttle=backfill_throttle
+                )
             except NotFoundError:
                 # Weekend/holiday: stamp it so a future --resume run skips it
                 # instead of re-downloading the same empty day.

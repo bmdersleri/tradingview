@@ -112,7 +112,9 @@ def test_sync_archive_range_walks_full_window(monkeypatch, tmp_path: Path) -> No
     }
     calls: list[date | None] = []
 
-    def fake_fetch(report_date: date | None) -> tuple[ff.FloatRecord, ...]:
+    def fake_fetch(
+        report_date: date | None, **_kw: object
+    ) -> tuple[ff.FloatRecord, ...]:
         calls.append(report_date)
         if report_date not in published:
             raise NotFoundError("missing", hint="x")
@@ -140,6 +142,60 @@ def test_sync_archive_range_walks_full_window(monkeypatch, tmp_path: Path) -> No
     assert store.is_known_empty(date(2026, 6, 10)) is True
 
 
+def test_backfill_survives_more_than_five_days(monkeypatch, tmp_path: Path) -> None:
+    """Regression: a backfill must not die on the interactive 5-per-10min bucket.
+
+    Earlier the range loop called the live ``fetch_report`` with no throttle, so
+    it rode the default 5-token/120s interactive bucket and aborted on the 6th
+    day. Here we drive the *real* ``freefloat.fetch_report`` (only the network
+    download and cache/throttle DB are redirected into tmp) over 8 published
+    days and assert all 8 land in the archive.
+    """
+    from tvcli.layers import freefloat as ff
+
+    now = datetime(2026, 6, 12, 9, 0, tzinfo=UTC)
+    store = ArchiveStore(tmp_path / "archive.sqlite3", clock=lambda: now)
+    # Eight consecutive published business days (06-02 .. 06-09).
+    published = {
+        date(2026, 6, day): (
+            _record(
+                "THYAO", 30.0 + day, label=f"{day:02d}.06.2026", float_shares=300.0
+            ),
+        )
+        for day in range(2, 10)
+    }
+
+    def fake_download(report_date: date) -> tuple[ff.FloatRecord, ...]:
+        if report_date not in published:
+            raise NotFoundError("missing", hint="x")
+        return published[report_date]
+
+    # Patch only the network seam + the cache/ratelimit DB path; the real
+    # fetch_report (with its token bucket) runs unmodified.
+    monkeypatch.setattr(ff, "_download_report", fake_download)
+    monkeypatch.setattr(
+        "tvcli.layers.freefloat.default_cache_path", lambda: tmp_path / "cache.sqlite3"
+    )
+    monkeypatch.setattr(
+        "tvcli.layers.freefloat_archive.default_cache_path",
+        lambda: tmp_path / "cache.sqlite3",
+    )
+    monkeypatch.setattr("tvcli.layers.freefloat_archive._sleep", lambda _s: None)
+
+    result = sync_archive(
+        latest=False,
+        since=date(2026, 6, 2),
+        until=date(2026, 6, 9),
+        max_days=None,
+        resume=False,
+        rate_seconds=20.0,
+        store=store,
+    )
+
+    assert result["synced_reports"] == 8  # all 8 days, not capped at 5
+    assert store.archive_stats()["reports"] == 8
+
+
 def test_backfill_resume_skips_synced_and_empty(monkeypatch, tmp_path: Path) -> None:
     clock = [datetime(2026, 6, 12, 9, 0, tzinfo=UTC)]
     store = ArchiveStore(tmp_path / "archive.sqlite3", clock=lambda: clock[0])
@@ -149,7 +205,9 @@ def test_backfill_resume_skips_synced_and_empty(monkeypatch, tmp_path: Path) -> 
         ),
     }
 
-    def fake_fetch(report_date: date | None) -> tuple[ff.FloatRecord, ...]:
+    def fake_fetch(
+        report_date: date | None, **_kw: object
+    ) -> tuple[ff.FloatRecord, ...]:
         if report_date not in published:
             raise NotFoundError("missing", hint="x")
         return published[report_date]
@@ -173,7 +231,9 @@ def test_backfill_resume_skips_synced_and_empty(monkeypatch, tmp_path: Path) -> 
     clock[0] = clock[0] + timedelta(minutes=11)
     calls: list[date | None] = []
 
-    def tracking_fetch(report_date: date | None) -> tuple[ff.FloatRecord, ...]:
+    def tracking_fetch(
+        report_date: date | None, **_kw: object
+    ) -> tuple[ff.FloatRecord, ...]:
         calls.append(report_date)
         return fake_fetch(report_date)
 
