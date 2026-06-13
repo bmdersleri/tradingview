@@ -757,10 +757,12 @@ class ArchiveStore:
         args.append(limit)
         with self._connect() as conn:
             rows = conn.execute(sql, tuple(args)).fetchall()
-        return [
-            {**dict(row), "payload": json.loads(str(row["payload_json"]))}
-            for row in rows
-        ]
+        events: list[dict[str, Any]] = []
+        for row in rows:
+            event = dict(row)
+            event["payload"] = json.loads(str(event.pop("payload_json")))
+            events.append(event)
+        return events
 
     def latest_risk_events(self, symbol: str) -> list[dict[str, Any]]:
         """Events recorded at the symbol's most recent archived report (local only).
@@ -786,10 +788,14 @@ class ArchiveStore:
                 """,
                 (code, str(latest["d"])),
             ).fetchall()
-        return [
-            {**dict(row), "payload": json.loads(str(row["payload_json"]))}
-            for row in rows
-        ]
+        events: list[dict[str, Any]] = []
+        for row in rows:
+            event = dict(row)
+            # Replace the raw JSON column with its parsed form; callers consume
+            # `payload`, not the stringified column.
+            event["payload"] = json.loads(str(event.pop("payload_json")))
+            events.append(event)
+        return events
 
     def build_symbol_report(self, symbol: str, *, limit: int = 20) -> dict[str, Any]:
         code = freefloat.normalize_code(symbol)
