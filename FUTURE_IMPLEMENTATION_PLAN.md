@@ -1,77 +1,91 @@
-# tvcli — Future Implementation Plan
+# BIST Free-Float Dashboard — Advanced Features Implementation Plan
 
-This document outlines the detailed, step-by-step roadmap for implementing advanced technical indicators, settings management, alert histories, KAP announcement feeds, and sector analysis modules into the BIST Free-Float Dashboard.
-
----
-
-## Phase 1: Interactive Technical Indicators on the Web UI
-
-This phase brings advanced charting capabilities directly to the web dashboard, enabling SMA, EMA, WMA, Bollinger Bands, RSI, and MACD overlays.
-
-### Tasks
-- **T1.1: Extend UI API (`app.py` / `/api/ohlcv/indicators`)**
-  - Create a FastAPI endpoint to compute indicator series (SMA, EMA, WMA, BBands, RSI, MACD) dynamically for a given symbol and configuration parameters.
-  - Integrate with the existing `src/tvcli/layers/indicators.py` module to compute averages and bands.
-- **T1.2: Add Technical Indicator Controls to Dashboard UI**
-  - Embed toggle buttons and configuration inputs (e.g., period dropdowns) on the main dashboard chart area.
-  - Enable toggling overlays (MA lines, Bollinger Bands) and indicator panes (RSI, MACD) below the main price pane.
-- **T1.3: Render Indicators on Lightweight Charts**
-  - Update JavaScript charting code in `app.py` to dynamically create line series for MAs, area series for Bollinger Bands, and standalone bottom charts for RSI and MACD.
-  - Implement dynamic updates when changing active indicator toggles or symbols.
+This plan details the step-by-step roadmap for implementing interactive technical indicators, a settings management panel, an alert history audit log, and KAP announcement feed markers.
 
 ---
 
-## Phase 2: Interactive Alert Settings Panel
+## Phase 1: Interactive Technical Indicators (WMA, BBands, RSI, MACD)
 
-Allows the user to view, edit, and test alert thresholds and Telegram bot parameters directly from a secure Settings tab in the web interface.
+Integrate WMA 20, Bollinger Bands (20, 2), RSI 14, and MACD (12, 26, 9) indicators directly into the dashboard. Controls (checkboxes) and sub-charts must render and sync dynamically.
 
-### Tasks
-- **T2.1: Implement Settings API**
-  - Add `GET /api/settings` to load the active `config.toml` structure (Telegram token, Chat ID, Webhook URL, thresholds).
-  - Add `POST /api/settings/update` to validate and write new configuration parameters back to `config.toml`.
-  - Add `POST /api/settings/test` to trigger a test Telegram/Webhook message.
-- **T2.2: Build Settings UI Form**
-  - Create a sleek "Ayarlar / Settings" modal or tab in the HTML/CSS template.
-  - Build inputs for Telegram tokens, chat IDs, webhook targets, and numeric sliders for ratio jump/drop alert thresholds.
-  - Integrate visual success/failure feedback on test alarms.
+### Step 1.1: Complete JS Chart Rendering & Reset Logic (`createSymbolCharts`)
+- Clear any existing indicator series (`wmaSeries`, `bbBasisSeries`, `bbUpperSeries`, `bbLowerSeries`, `rsiSeries`, `macdLineSeries`, `macdSignalSeries`, `macdHistSeries`) and sub-chart instances (`rsiChartInstance`, `macdChartInstance`) when drawing a new symbol to avoid canvas duplication or leaking memory.
+- Add indicator checkboxes change listeners to call `updateSymbolCharts()` or `toggleIndicatorPanes()`.
+
+### Step 1.2: Add Bollinger Bands & WMA 20 Overlays on Main Chart
+- Compute WMA 20 using `calculateWMA(ratioData, 20)`.
+- Compute Bollinger Bands (20, 2) using `calculateBollingerBands(ratioData, 20, 2)`.
+- If the WMA/Bollinger Bands options are toggled, show the line overlays directly on `ratioChartInstance`.
+
+### Step 1.3: Initialize and Sync RSI / MACD Sub-Charts
+- When the RSI or MACD checkbox is enabled:
+  - Create the sub-chart instances (`rsiChartInstance`, `macdChartInstance`) using `LightweightCharts.createChart` in `#rsiChartDiv` and `#macdChartDiv`.
+  - Populate them with calculated RSI (`calculateRSI`) or MACD (`calculateMACD`) series.
+  - Set CSS styles to display the divs (`display: block` or `display: none`).
+- Synchronize all charts (Ratio Chart, Shares Chart, RSI, MACD) timescales using the `subscribeVisibleTimeRangeChange` event:
+  - Scroll or zoom in one pane must automatically update the other panes.
 
 ---
 
-## Phase 3: Alert History Log Table
+## Phase 2: Interactive Alert Settings Panel (Settings UI)
 
-Provides a chronological logging table inside the web interface to audit previously triggered alerts.
+Provide a secure and user-friendly interface to manage threshold settings and Telegram bot details.
 
-### Tasks
-- **T3.1: Add Alert Log Table & API Query**
-  - Create `GET /api/alerts/history` to query logged alerts from the SQLite database.
-  - Enable sorting and filtering by symbol, severity, and status (sent, failed, pending).
-- **T3.2: Build Alert History UI Component**
-  - Add a "Alarmlar / Alerts" tab to the dashboard.
-  - Render a responsive data table containing: Date, Symbol, Change details, Severity, Channel, and Delivery Status.
+### Step 2.1: Implement Settings API in FastAPI (`src/tvcli/floatdash/app.py`)
+- **`GET /api/settings`**: Read settings from `config.toml` (XDG config directory) and return them as JSON. Sensitive keys (like Telegram token) should be partially masked for display.
+- **`POST /api/settings/update`**: Accept JSON payload, validate types/formats, write updated values back to `config.toml`, and reload configuration in the running server.
+- **`POST /api/settings/test`**: Trigger a test Telegram or webhook alert using the unsaved (or saved) credentials to verify connectivity.
+
+### Step 2.2: Add Settings Tab/Modal to HTML UI
+- Build a tabbed navigation system in the dashboard header: **"Dashboard"** and **"Settings (Ayarlar)"**.
+- Style the Settings form using existing dark mode CSS tokens:
+  - Fields for: Telegram Bot Token, Telegram Chat ID, Webhook URL, Severe Low Float Threshold (%), and Ratio Change Alarm Threshold (%).
+  - Include a "Test Connection" button and a "Save Settings" button with clear success/error notifications.
+
+---
+
+## Phase 3: Alert History Log Table (Alert History)
+
+Enable users to audit past alerts and filter them directly inside the web UI.
+
+### Step 3.1: SQLite History Table & API Route
+- Query the existing SQLite database (or log file) for sent alert history.
+- **`GET /api/alerts/history`**: Return JSON list of past alerts sorted by date descending, supporting optional query parameters for filtering by symbol, severity (High, Info), and delivery channel (Telegram, Webhook).
+
+### Step 3.2: Render Alert Logs Table in UI
+- Add an **"Alerts (Alarm Geçmişi)"** tab to the dashboard.
+- Create a responsive data table using HTML and standard CSS:
+  - Columns: Timestamp, Symbol, Alarm Description, Ratio Value, Severity (rendered with badge colors), Status (Success / Failed).
 
 ---
 
 ## Phase 4: KAP (Public Disclosure Platform) Integration
 
-Matches free-float changes with their corresponding KAP official announcements and prints them on the chart timeline.
+Match free-float changes with their corresponding KAP disclosures, showing markers on the charts.
 
-### Tasks
-- **T4.1: Create KAP News Scraper & Storage**
-  - Implement a crawler/parser in `src/tvcli/layers/kap.py` or fetch news feed matching stock codes.
-  - Store announcements in a `freefloat_news` SQLite table linked by symbol and publication date.
-- **T4.2: Embed News Markers on Lightweight Charts**
-  - Use Lightweight Charts "markers" API to pin small news icons on dates where KAP announcements occurred.
-  - Show interactive tooltips containing the disclosure details/text when clicking a marker.
+### Step 4.1: KAP RSS Scraper & API Endpoint
+- Implement a parser to fetch KAP announcement feeds for BIST stocks (either from public RSS feeds or simulated API data).
+- Save announcements into a new `kap_disclosures` table in the SQLite database, referencing `symbol` and `disclosure_date`.
+- **`GET /api/symbol/{code}/kap`**: Retrieve announcements for a specific symbol to render on the client side.
+
+### Step 4.2: Draw KAP Markers on Lightweight Charts
+- Use the Lightweight Charts `setMarkers` API to add news/KAP pin markers on the ratio chart timeline on dates corresponding to public disclosures.
+- Implement an interactive details tooltip/modal on marker click, displaying the subject and body of the KAP announcement.
 
 ---
 
-## Phase 5: Sector Detail & Comparative Analysis
+## Verification & Acceptance Sequence
 
-Provides deep-dives into specific BIST sectors with comparative metrics and volatility.
-
-### Tasks
-- **T5.1: Implement Sector API**
-  - Create `GET /api/sectors/{sector}` to return sector-wide statistics (average ratio, total nominal capital, top low-float risks, volatility index).
-- **T5.2: Build Sector Detail UI**
-  - Enable clicking a sector block on the Heatmap to load a dedicated sectoral detail dashboard.
-  - Render a sector-specific line chart showing average free-float ratio trend and a comparison grid of constituent stocks.
+1. Run Ruff formatter and linter:
+   ```bash
+   uv run ruff format src/ tests/
+   uv run ruff check src/ --output-format concise
+   ```
+2. Run unit tests to check if anything is broken:
+   ```bash
+   uv run pytest tests/ -q --tb=short -m "not slow" -n auto --dist=loadfile
+   ```
+3. Verify git workspace status:
+   ```bash
+   git diff --check
+   ```
