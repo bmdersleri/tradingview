@@ -16,7 +16,7 @@
 - [x] Arayüz üzerinden İnteraktif İndikatör Kontrolleri (SMA, EMA, WMA, RSI, MACD)
 - [x] Arayüz üzerinden Alarm Eşikleri ve Telegram Ayarları Paneli (Settings UI)
 - [x] Kronolojik Alarm Geçmişi ve Günlüğü Tablosu (Alert History)
-- [ ] KAP Duyuruları Entegrasyonu ve Grafik Üzerinde Duyuru İkonları (KAP News)
+- [x] KAP Duyuruları Entegrasyonu ve Grafik Üzerinde Duyuru İkonları (KAP News)
 - [ ] Sektör Detay ve Karşılaştırma Sayfası (Sector Analysis)
 
 ## Aktif Geliştirme Detayları
