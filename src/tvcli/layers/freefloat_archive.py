@@ -240,6 +240,28 @@ class ArchiveStore:
             except sqlite3.OperationalError:
                 pass
 
+    def backup(self, target_path: Path) -> None:
+        """Safely backup the SQLite database to target_path using SQLite Backup API."""
+        target_path.parent.mkdir(parents=True, exist_ok=True)
+        with self._connect() as src_conn:
+            dst_conn = sqlite3.connect(target_path)
+            try:
+                with dst_conn:
+                    src_conn.backup(dst_conn)
+            finally:
+                dst_conn.close()
+
+    def restore(self, source_path: Path) -> None:
+        """Safely restore the SQLite database from source_path using SQLite Backup API."""
+        if not source_path.exists():
+            raise FileNotFoundError(f"Backup file not found: {source_path}")
+        src_conn = sqlite3.connect(source_path)
+        try:
+            with self._connect() as dst_conn:
+                src_conn.backup(dst_conn)
+        finally:
+            src_conn.close()
+
     def _parse_ts(self, value: str | None) -> datetime | None:
         if not value:
             return None

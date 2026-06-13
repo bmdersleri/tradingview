@@ -29,6 +29,9 @@ app.add_typer(dev.app, name="dev")
 cache_app = typer.Typer(add_completion=False, help="Cache utilities")
 app.add_typer(cache_app, name="cache")
 
+db_app = typer.Typer(add_completion=False, help="Database utilities (Backup / Restore)")
+app.add_typer(db_app, name="db")
+
 
 @app.callback(invoke_without_command=True)
 def main(
@@ -109,3 +112,132 @@ def cache_clear(
         build_envelope(command="cache.clear", data={"cleared": True}),
         json_mode=json_mode,
     )
+
+
+@db_app.command("backup")
+def db_backup(
+    ctx: typer.Context,
+    target: Annotated[
+        Path | None,
+        typer.Option(
+            "--target",
+            "-t",
+            help=(
+                "Target path for the backup file. "
+                "Defaults to auto-generated path in XDG data directory."
+            ),
+        ),
+    ] = None,
+    json_mode: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    """Safely backup the free-float database."""
+    json_mode = json_mode or bool(ctx.obj.get("json_mode", False))
+    from datetime import datetime
+
+    from .config import default_archive_path, default_data_dir
+    from .layers.freefloat_archive import ArchiveStore
+
+    archive_path = default_archive_path()
+    if not archive_path.exists():
+        emit(
+            build_envelope(
+                command="db.backup",
+                ok=False,
+                error={
+                    "code": 1,
+                    "message": (
+                        "Database file does not exist. Run sync or dev seed-db first."
+                    ),
+                    "hint": "Run sync or dev seed-db first",
+                    "retryable": False,
+                },
+            ),
+            json_mode=json_mode,
+        )
+        raise typer.Exit(code=1)
+
+    if target is None:
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        target = default_data_dir() / "backups" / f"backup_{timestamp}.sqlite3"
+
+    try:
+        store = ArchiveStore(archive_path)
+        store.backup(target)
+        emit(
+            build_envelope(
+                command="db.backup",
+                data={
+                    "backup_path": str(target.resolve()),
+                    "source_path": str(archive_path.resolve()),
+                    "size_bytes": target.stat().st_size,
+                },
+            ),
+            json_mode=json_mode,
+        )
+    except Exception as e:
+        emit(
+            build_envelope(
+                command="db.backup",
+                ok=False,
+                error={
+                    "code": 1,
+                    "message": str(e),
+                    "hint": "Check target directory permissions",
+                    "retryable": False,
+                },
+            ),
+            json_mode=json_mode,
+        )
+        raise typer.Exit(code=1) from e
+
+
+@db_app.command("restore")
+def db_restore(
+    ctx: typer.Context,
+    source: Annotated[
+        Path,
+        typer.Argument(
+            help="Path to the backup SQLite file to restore from.",
+            exists=True,
+            file_okay=True,
+            dir_okay=False,
+        ),
+    ],
+    json_mode: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    """Safely restore the free-float database from a backup."""
+    json_mode = json_mode or bool(ctx.obj.get("json_mode", False))
+    from .config import default_archive_path
+    from .layers.freefloat_archive import ArchiveStore
+
+    archive_path = default_archive_path()
+
+    try:
+        store = ArchiveStore(archive_path)
+        store.restore(source)
+        emit(
+            build_envelope(
+                command="db.restore",
+                data={
+                    "restored_path": str(archive_path.resolve()),
+                    "source_path": str(source.resolve()),
+                    "size_bytes": archive_path.stat().st_size,
+                },
+            ),
+            json_mode=json_mode,
+        )
+    except Exception as e:
+        emit(
+            build_envelope(
+                command="db.restore",
+                ok=False,
+                error={
+                    "code": 1,
+                    "message": str(e),
+                    "hint": "Ensure the backup file path exists and is readable",
+                    "retryable": False,
+                },
+            ),
+            json_mode=json_mode,
+        )
+        raise typer.Exit(code=1) from e
