@@ -390,6 +390,30 @@ def create_app(store: freefloat_archive.ArchiveStore | None = None) -> FastAPI:
         .clickable-code:hover {
             color: var(--accent-hover);
         }
+
+        .card {
+            background-color: rgba(24, 28, 39, 0.6);
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            padding: 1.5rem;
+            box-shadow: 0 4px 24px rgba(0, 0, 0, 0.15);
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+
+        .card:hover {
+            box-shadow: 0 6px 30px rgba(38, 166, 154, 0.05);
+        }
+
+        .summary-card {
+            background: linear-gradient(135deg, rgba(24, 28, 39, 0.8), rgba(15, 17, 26, 0.9));
+            border-left: 4px solid var(--accent-color);
+        }
+
+        .insights-grid {
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 1.5rem;
+        }
     </style>
 </head>
 <body>
@@ -424,6 +448,25 @@ def create_app(store: freefloat_archive.ArchiveStore | None = None) -> FastAPI:
         <main class="content-area">
             <div id="errorBox" class="error-box"></div>
 
+            <div id="marketInfoBar" class="info-bar">
+                <div class="info-card">
+                    <span class="info-label">Piyasa Medyan Oranı</span>
+                    <span id="marketMedianRatio" class="info-value">-</span>
+                </div>
+                <div class="info-card">
+                    <span class="info-label">Takip Edilen Hisse</span>
+                    <span id="marketTotalSymbols" class="info-value">-</span>
+                </div>
+                <div class="info-card">
+                    <span class="info-label" style="color: var(--bearish);">Risk Oranı Kritik (<10%)</span>
+                    <span id="marketSevereRisk" class="info-value" style="color: var(--bearish);">-</span>
+                </div>
+                <div class="info-card">
+                    <span class="info-label" style="color: var(--warning);">Aktif Kritik Alarmlar</span>
+                    <span id="marketHighAlerts" class="info-value" style="color: var(--warning);">-</span>
+                </div>
+            </div>
+
             <div id="infoBar" class="info-bar" style="display: none;">
                 <div class="info-card">
                     <span class="info-label">Symbol / Name</span>
@@ -449,6 +492,66 @@ def create_app(store: freefloat_archive.ArchiveStore | None = None) -> FastAPI:
                 <div id="loaderOverlay" class="loader-overlay active">
                     <div class="spinner"></div>
                     <p id="loaderText">Loading BIST Market Overview...</p>
+                </div>
+            </div>
+
+            <!-- Market Insights & Analytics -->
+            <div id="marketInsightsContainer" class="insights-grid">
+                <!-- Market Analyst Summary Card -->
+                <div class="card summary-card">
+                    <h3 style="margin-bottom: 0.5rem; display: flex; align-items: center; gap: 0.5rem; color: var(--accent-color); font-size: 1.1rem;">
+                        <span>💡</span> Piyasa Analiz & Yönetici Özeti
+                    </h3>
+                    <p id="marketAnalystSummary" style="font-size: 0.95rem; line-height: 1.6; color: var(--text-primary);">
+                        Yükleniyor...
+                    </p>
+                </div>
+
+                <!-- Gainers & Losers Columns -->
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem;">
+                    <!-- Gainers Card -->
+                    <div class="card">
+                        <h3 style="margin-bottom: 0.75rem; display: flex; align-items: center; gap: 0.5rem; color: var(--bullish); font-size: 1.05rem;">
+                            <span>📈</span> En Çok Artan Dolaşım Oranları (Son Rapor)
+                        </h3>
+                        <div style="overflow-x: auto;">
+                            <table class="events-table">
+                                <thead>
+                                    <tr>
+                                        <th>Hisse</th>
+                                        <th>Önceki Oran</th>
+                                        <th>Yeni Oran</th>
+                                        <th>Değişim</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="topGainersBody">
+                                    <tr><td colspan="4" style="text-align: center; color: var(--text-secondary); padding: 1rem;">Yükleniyor...</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <!-- Losers Card -->
+                    <div class="card">
+                        <h3 style="margin-bottom: 0.75rem; display: flex; align-items: center; gap: 0.5rem; color: var(--bearish); font-size: 1.05rem;">
+                            <span>📉</span> En Çok Düşen Dolaşım Oranları (Son Rapor)
+                        </h3>
+                        <div style="overflow-x: auto;">
+                            <table class="events-table">
+                                <thead>
+                                    <tr>
+                                        <th>Hisse</th>
+                                        <th>Önceki Oran</th>
+                                        <th>Yeni Oran</th>
+                                        <th>Değişim</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="topLosersBody">
+                                    <tr><td colspan="4" style="text-align: center; color: var(--text-secondary); padding: 1rem;">Yükleniyor...</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
                 </div>
             </div>
 
@@ -599,6 +702,65 @@ def create_app(store: freefloat_archive.ArchiveStore | None = None) -> FastAPI:
                 } else {
                     eventsBody.innerHTML = '<tr><td colspan="5" style="text-align: center; color: var(--text-secondary); padding: 1.5rem;">Hiçbir alarm/dramatik değişiklik bulunamadı.</td></tr>';
                 }
+
+                // Populate Market Info Bar
+                document.getElementById('marketMedianRatio').innerText = `${data.median_ratio.toFixed(2)}%`;
+                document.getElementById('marketTotalSymbols').innerText = data.n_symbols;
+                document.getElementById('marketSevereRisk').innerText = data.summary ? data.summary.severe_risk_count : '-';
+                document.getElementById('marketHighAlerts').innerText = data.summary ? data.summary.total_high_alerts : '-';
+
+                // Populate Analyst Summary
+                const analystSummary = document.getElementById('marketAnalystSummary');
+                if (analystSummary) {
+                    const severeCount = data.summary ? data.summary.severe_risk_count : 0;
+                    const alertCount = data.summary ? data.summary.total_high_alerts : 0;
+                    analystSummary.innerHTML = `
+                        BIST genelinde son rapor tarihi olan <strong>${data.report_date}</strong> itibarıyla <strong>${data.n_symbols}</strong> hisse senedi takip edilmektedir.
+                        Genel piyasa medyan fiili dolaşım oranı <strong>%${data.median_ratio.toFixed(2)}</strong> seviyesindedir.
+                        <strong>${severeCount}</strong> adet hisse kritik %10 eşiğinin altında olup yüksek likidite ve volatilite riski barındırmaktadır.
+                        Son raporda toplam <strong>${alertCount}</strong> adet yüksek öncelikli/kritik alarm tetiklenmiştir.
+                    `;
+                }
+
+                // Populate Top Gainers
+                const gainersBody = document.getElementById('topGainersBody');
+                if (gainersBody) {
+                    if (data.top_gainers && data.top_gainers.length > 0) {
+                        gainersBody.innerHTML = '';
+                        data.top_gainers.forEach(item => {
+                            const tr = document.createElement('tr');
+                            tr.innerHTML = `
+                                <td><span class="clickable-code" onclick="loadSymbol('${item.code}')">${item.code}</span></td>
+                                <td>${item.previous_ratio.toFixed(2)}%</td>
+                                <td>${item.current_ratio.toFixed(2)}%</td>
+                                <td style="color: var(--bullish); font-weight: 600;">+${item.delta.toFixed(2)}%</td>
+                            `;
+                            gainersBody.appendChild(tr);
+                        });
+                    } else {
+                        gainersBody.innerHTML = '<tr><td colspan="4" style="text-align: center; color: var(--text-secondary); padding: 1rem;">Veri bulunamadı (Karşılaştırma için en az iki rapor gereklidir).</td></tr>';
+                    }
+                }
+
+                // Populate Top Losers
+                const losersBody = document.getElementById('topLosersBody');
+                if (losersBody) {
+                    if (data.top_losers && data.top_losers.length > 0) {
+                        losersBody.innerHTML = '';
+                        data.top_losers.forEach(item => {
+                            const tr = document.createElement('tr');
+                            tr.innerHTML = `
+                                <td><span class="clickable-code" onclick="loadSymbol('${item.code}')">${item.code}</span></td>
+                                <td>${item.previous_ratio.toFixed(2)}%</td>
+                                <td>${item.current_ratio.toFixed(2)}%</td>
+                                <td style="color: var(--bearish); font-weight: 600;">${item.delta.toFixed(2)}%</td>
+                            `;
+                            losersBody.appendChild(tr);
+                        });
+                    } else {
+                        losersBody.innerHTML = '<tr><td colspan="4" style="text-align: center; color: var(--text-secondary); padding: 1rem;">Veri bulunamadı (Karşılaştırma için en az iki rapor gereklidir).</td></tr>';
+                    }
+                }
             } catch (err) {
                 console.error("Failed to load leaderboard:", err);
             }
@@ -626,6 +788,8 @@ def create_app(store: freefloat_archive.ArchiveStore | None = None) -> FastAPI:
             document.getElementById('errorBox').style.display = 'none';
             document.getElementById('infoBar').style.display = 'none';
             document.getElementById('symbolEventsCard').style.display = 'none';
+            document.getElementById('marketInfoBar').style.display = 'grid';
+            document.getElementById('marketInsightsContainer').style.display = 'grid';
             document.getElementById('marketEventsCard').style.display = 'block';
 
             document.querySelectorAll('.leaderboard-item').forEach(item => item.classList.remove('active'));
@@ -639,6 +803,8 @@ def create_app(store: freefloat_archive.ArchiveStore | None = None) -> FastAPI:
             activeCode = code.toUpperCase();
             document.getElementById('errorBox').style.display = 'none';
             document.getElementById('marketEventsCard').style.display = 'none';
+            document.getElementById('marketInfoBar').style.display = 'none';
+            document.getElementById('marketInsightsContainer').style.display = 'none';
             document.getElementById('symbolEventsCard').style.display = 'block';
 
             document.querySelectorAll('.leaderboard-item').forEach(item => item.classList.remove('active'));
@@ -776,6 +942,85 @@ def create_app(store: freefloat_archive.ArchiveStore | None = None) -> FastAPI:
                     (latest_date,),
                 ).fetchall()
 
+                # Calculate severe risk count (<10%) and warning risk count (10%-20%)
+                severe_risk_row = conn.execute(
+                    "SELECT COUNT(*) AS cnt FROM freefloat_snapshots WHERE report_date = ? AND ratio < 10.0",
+                    (latest_date,),
+                ).fetchone()
+                severe_risk_count = (
+                    int(severe_risk_row["cnt"]) if severe_risk_row else 0
+                )
+
+                warning_risk_row = conn.execute(
+                    "SELECT COUNT(*) AS cnt FROM freefloat_snapshots WHERE report_date = ? AND ratio >= 10.0 AND ratio < 20.0",
+                    (latest_date,),
+                ).fetchone()
+                warning_risk_count = (
+                    int(warning_risk_row["cnt"]) if warning_risk_row else 0
+                )
+
+                total_high_alerts_row = conn.execute(
+                    "SELECT COUNT(*) AS cnt FROM freefloat_events WHERE report_date = ? AND severity = 'high'",
+                    (latest_date,),
+                ).fetchone()
+                total_high_alerts = (
+                    int(total_high_alerts_row["cnt"]) if total_high_alerts_row else 0
+                )
+
+                # Determine previous report date to find top gainers and top losers
+                prev_date_row = conn.execute(
+                    "SELECT report_date FROM freefloat_reports WHERE report_date < ? ORDER BY report_date DESC LIMIT 1",
+                    (latest_date,),
+                ).fetchone()
+                previous_date = prev_date_row["report_date"] if prev_date_row else None
+
+                top_gainers = []
+                top_losers = []
+                if previous_date:
+                    gainers_rows = conn.execute(
+                        """
+                        SELECT curr.code, curr.name, curr.ratio AS current_ratio, prev.ratio AS previous_ratio,
+                               (curr.ratio - prev.ratio) AS delta
+                        FROM freefloat_snapshots curr
+                        JOIN freefloat_snapshots prev ON curr.code = prev.code AND prev.report_date = ?
+                        WHERE curr.report_date = ? AND delta > 0
+                        ORDER BY delta DESC LIMIT 5
+                        """,
+                        (previous_date, latest_date),
+                    ).fetchall()
+                    top_gainers = [
+                        {
+                            "code": r["code"],
+                            "name": r["name"],
+                            "current_ratio": float(r["current_ratio"]),
+                            "previous_ratio": float(r["previous_ratio"]),
+                            "delta": float(r["delta"]),
+                        }
+                        for r in gainers_rows
+                    ]
+
+                    losers_rows = conn.execute(
+                        """
+                        SELECT curr.code, curr.name, curr.ratio AS current_ratio, prev.ratio AS previous_ratio,
+                               (curr.ratio - prev.ratio) AS delta
+                        FROM freefloat_snapshots curr
+                        JOIN freefloat_snapshots prev ON curr.code = prev.code AND prev.report_date = ?
+                        WHERE curr.report_date = ? AND delta < 0
+                        ORDER BY delta ASC LIMIT 5
+                        """,
+                        (previous_date, latest_date),
+                    ).fetchall()
+                    top_losers = [
+                        {
+                            "code": r["code"],
+                            "name": r["name"],
+                            "current_ratio": float(r["current_ratio"]),
+                            "previous_ratio": float(r["previous_ratio"]),
+                            "delta": float(r["delta"]),
+                        }
+                        for r in losers_rows
+                    ]
+
             all_ratios = [float(r["ratio"]) for r in rows]
             n_symbols = len(all_ratios)
             if n_symbols == 0:
@@ -819,6 +1064,13 @@ def create_app(store: freefloat_archive.ArchiveStore | None = None) -> FastAPI:
                 "leaderboard": leaderboard,
                 "event_summary": event_summary,
                 "dramatic_changes": dramatic_changes[:30],  # Limit to top 30
+                "summary": {
+                    "severe_risk_count": severe_risk_count,
+                    "warning_risk_count": warning_risk_count,
+                    "total_high_alerts": total_high_alerts,
+                },
+                "top_gainers": top_gainers,
+                "top_losers": top_losers,
             }
         except Exception as e:
             if isinstance(e, HTTPException):
