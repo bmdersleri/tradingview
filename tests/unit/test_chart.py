@@ -274,6 +274,55 @@ def test_signal_query_enriches_bist_with_free_float(monkeypatch) -> None:
     assert "manipulation" in payload["liquidity"]["note"].lower()
 
 
+def test_signal_query_attaches_archive_risk_events(monkeypatch) -> None:
+    from tvcli.commands import chart as chart_cmd
+    from tvcli.layers import freefloat, ohlcv
+
+    bars = tuple(
+        ohlcv.OhlcvBar(
+            time=1_700_000_000 + i * 86_400,
+            open=100.0 + i,
+            high=101.0 + i,
+            low=99.0 + i,
+            close=100.0 + i,
+            volume=1000.0,
+        )
+        for i in range(260)
+    )
+    monkeypatch.setattr(
+        "tvcli.commands.chart.ohlcv.fetch_history", lambda request: bars
+    )
+    # Liquid float (no liquidity damp) so the event damp is isolated.
+    monkeypatch.setattr(
+        "tvcli.commands.chart.freefloat.lookup",
+        lambda code: freefloat.FloatRecord(
+            code="THYAO",
+            isin="X",
+            name="T",
+            float_shares=1.0,
+            capital=10.0,
+            ratio=55.0,
+            date="11.06.2026",
+        ),
+    )
+    monkeypatch.setattr(
+        "tvcli.layers.freefloat_archive.ArchiveStore.latest_risk_events",
+        lambda self, symbol: [
+            {"event_type": "ratio_jump_down", "severity": "high", "code": "THYAO"}
+        ],
+    )
+
+    payload = chart_cmd.signal_query(
+        chart_cmd.SignalRequest(symbol="BIST:THYAO", interval="1d", bars=260)
+    )
+    liquidity = payload["liquidity"]
+    assert liquidity["free_float"] == 55.0  # liquid: no low-float note
+    assert liquidity["note"] is None
+    assert len(liquidity["events"]) == 1
+    assert liquidity["events"][0]["event_type"] == "ratio_jump_down"
+    assert liquidity["event_note"] is not None
+
+
 def test_signal_query_skips_free_float_for_non_bist(monkeypatch) -> None:
     from tvcli.commands import chart as chart_cmd
     from tvcli.layers import ohlcv

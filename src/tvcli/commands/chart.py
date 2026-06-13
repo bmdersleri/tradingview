@@ -39,6 +39,23 @@ def _free_float_for(symbol: str) -> float | None:
     return record.ratio if record is not None else None
 
 
+def _risk_events_for(symbol: str) -> list[dict[str, Any]]:
+    """Recent adverse free-float events from the local archive (no network).
+
+    Read-only and local-first: events are materialized during sync. Non-BIST
+    symbols have no VAP coverage; an empty/erroring archive yields no events and
+    never blocks the signal.
+    """
+    if not freefloat.is_bist_symbol(symbol):
+        return []
+    from ..layers.freefloat_archive import ArchiveStore
+
+    try:
+        return ArchiveStore().latest_risk_events(freefloat.normalize_code(symbol))
+    except Exception:
+        return []
+
+
 def analyze_query(request: analyze.AnalyzeRequest) -> dict[str, Any]:
     payload = analyze.run_analysis(request)
     # When --auto produced a signal block, enrich it with VAP free-float the same
@@ -54,6 +71,14 @@ def analyze_query(request: analyze.AnalyzeRequest) -> dict[str, Any]:
             liquidity["note"] = signals.low_float_note(free_float)
             signal_block["confidence"] = signals.damp_confidence(
                 float(signal_block["confidence"]), free_float
+            )
+        adverse = signals.adverse_events(_risk_events_for(request.symbol))
+        if adverse:
+            liquidity = signal_block.setdefault("liquidity", {})
+            liquidity["events"] = list(adverse)
+            liquidity["event_note"] = signals.event_risk_note(adverse)
+            signal_block["confidence"] = signals.damp_for_events(
+                float(signal_block["confidence"]), adverse
             )
     return payload
 
@@ -76,6 +101,7 @@ def signal_query(request: SignalRequest) -> dict[str, Any]:
     free_float = _free_float_for(request.symbol)
     if free_float is not None:
         report = signals.apply_liquidity(report, free_float)
+    report = signals.apply_event_risk(report, _risk_events_for(request.symbol))
     payload = signals.signal_payload(report)
     payload.update(
         {"symbol": request.symbol, "interval": request.interval, "bars": len(bars)}
@@ -191,6 +217,7 @@ def _write_signal_human(payload: dict[str, Any]) -> None:
         "regime_strength": regime.get("strength"),
         "free_float_%": "—" if free_float is None else free_float,
         "liquidity_note": liquidity.get("note") or "—",
+        "event_note": liquidity.get("event_note") or "—",
     }
     sys.stdout.write(render_table(summary))
     votes = payload.get("votes") or []

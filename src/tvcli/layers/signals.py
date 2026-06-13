@@ -13,8 +13,9 @@ the future.
 
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
-from typing import Literal
+from typing import Any, Literal
 
 from . import indicators as ind
 
@@ -304,6 +305,9 @@ class SignalReport:
     selected_indicators: tuple[str, ...]
     free_float: float | None = None  # free-float ratio (%), if known
     liquidity_note: str | None = None  # liquidity/manipulation-risk warning
+    # Recent adverse free-float events from the local archive, kept as context.
+    risk_events: tuple[dict[str, Any], ...] = ()
+    event_note: str | None = None  # summary of the adverse events, if any
 
 
 # Below this free-float percentage a stock is thin and easier to push around, so
@@ -342,6 +346,72 @@ def apply_liquidity(report: SignalReport, free_float: float) -> SignalReport:
         confidence=damp_confidence(report.confidence, free_float),
         free_float=round(free_float, 2),
         liquidity_note=low_float_note(free_float),
+    )
+
+
+# Free-float events that argue for *extra* caution on a long/buy read: a sudden
+# float contraction or a drop through the thin-float threshold all reduce
+# tradability without changing the price-derived direction. Like free-float
+# itself, they temper confidence and add context — they never flip the signal.
+_ADVERSE_EVENT_TYPES = frozenset(
+    {
+        "ratio_jump_down",
+        "ratio_threshold_cross_down",
+        "float_shares_jump_down",
+        "liquidity_risk_low_float",
+    }
+)
+_EVENT_CONFIDENCE_FACTOR = 0.85
+
+
+def adverse_events(
+    events: Sequence[Mapping[str, Any]],
+) -> tuple[dict[str, Any], ...]:
+    """Keep only the high-severity adverse events worth surfacing on a signal."""
+    return tuple(
+        dict(event)
+        for event in events
+        if event.get("event_type") in _ADVERSE_EVENT_TYPES
+        and event.get("severity") == "high"
+    )
+
+
+def event_risk_note(events: Sequence[Mapping[str, Any]]) -> str | None:
+    """A one-line summary of adverse free-float events, or None when there are none."""
+    if not events:
+        return None
+    kinds = ", ".join(sorted({str(event.get("event_type")) for event in events}))
+    return (
+        f"Recent adverse free-float event(s) ({kinds}): float-side risk rose "
+        "lately — treat the signal with extra caution."
+    )
+
+
+def damp_for_events(confidence: float, events: Sequence[Mapping[str, Any]]) -> float:
+    """Discount confidence once when adverse events are present; else unchanged."""
+    if not events:
+        return confidence
+    return round(confidence * _EVENT_CONFIDENCE_FACTOR, 4)
+
+
+def apply_event_risk(
+    report: SignalReport, events: Sequence[Mapping[str, Any]]
+) -> SignalReport:
+    """Attach recent adverse free-float events; damp confidence when any are present.
+
+    Mirrors :func:`apply_liquidity`: events are context, never a direction flip.
+    Compose the two for the full picture (free-float level + recent float moves).
+    """
+    from dataclasses import replace
+
+    adverse = adverse_events(events)
+    if not adverse:
+        return report
+    return replace(
+        report,
+        confidence=damp_for_events(report.confidence, adverse),
+        risk_events=adverse,
+        event_note=event_risk_note(adverse),
     )
 
 
@@ -401,6 +471,8 @@ def signal_payload(report: SignalReport) -> dict[str, object]:
         "liquidity": {
             "free_float": report.free_float,
             "note": report.liquidity_note,
+            "events": list(report.risk_events),
+            "event_note": report.event_note,
         },
         "disclaimer": DISCLAIMER,
     }

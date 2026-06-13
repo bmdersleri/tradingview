@@ -130,7 +130,65 @@ def test_apply_liquidity_high_float_keeps_confidence() -> None:
 def test_signal_payload_has_liquidity_block() -> None:
     payload = s.signal_payload(s.analyze_signal(_uptrend()))
     assert "liquidity" in payload
-    assert payload["liquidity"] == {"free_float": None, "note": None}
+    assert payload["liquidity"] == {
+        "free_float": None,
+        "note": None,
+        "events": [],
+        "event_note": None,
+    }
+
+
+def _high(event_type: str) -> dict[str, object]:
+    return {"event_type": event_type, "severity": "high", "code": "X"}
+
+
+def test_adverse_events_filters_to_high_severity_adverse() -> None:
+    events = [
+        _high("ratio_jump_down"),
+        _high("float_shares_jump_down"),
+        {"event_type": "ratio_jump_up", "severity": "high"},  # adverse type? no
+        {"event_type": "ratio_jump_down", "severity": "medium"},  # not high
+        {"event_type": "new_52w_high_ratio", "severity": "high"},  # not adverse
+    ]
+    kept = s.adverse_events(events)
+    assert {e["event_type"] for e in kept} == {
+        "ratio_jump_down",
+        "float_shares_jump_down",
+    }
+
+
+def test_apply_event_risk_damps_confidence_and_attaches() -> None:
+    base = s.analyze_signal(_uptrend())
+    enriched = s.apply_event_risk(base, [_high("ratio_threshold_cross_down")])
+    # Direction unchanged; confidence discounted once; events + note attached.
+    assert enriched.signal == base.signal
+    assert enriched.confidence < base.confidence
+    assert len(enriched.risk_events) == 1
+    assert enriched.event_note is not None
+    assert "caution" in enriched.event_note.lower()
+
+
+def test_apply_event_risk_noop_without_adverse_events() -> None:
+    base = s.analyze_signal(_uptrend())
+    # No events, and non-adverse events, both leave the report untouched.
+    assert s.apply_event_risk(base, []) is base
+    only_benign = [{"event_type": "new_52w_high_ratio", "severity": "high"}]
+    assert s.apply_event_risk(base, only_benign) is base
+
+
+def test_apply_event_risk_composes_with_liquidity() -> None:
+    base = s.analyze_signal(_uptrend())
+    after_float = s.apply_liquidity(base, 12.0)
+    after_both = s.apply_event_risk(after_float, [_high("float_shares_jump_down")])
+    # Both damps stack; the free-float read is preserved.
+    assert after_both.confidence < after_float.confidence
+    assert after_both.free_float == 12.0
+    assert after_both.liquidity_note is not None
+    assert after_both.event_note is not None
+    payload = s.signal_payload(after_both)
+    assert payload["liquidity"]["free_float"] == 12.0
+    assert len(payload["liquidity"]["events"]) == 1
+    assert payload["liquidity"]["event_note"] is not None
 
 
 def test_votes_handle_short_series_without_crashing() -> None:

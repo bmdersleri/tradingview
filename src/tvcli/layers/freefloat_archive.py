@@ -762,6 +762,35 @@ class ArchiveStore:
             for row in rows
         ]
 
+    def latest_risk_events(self, symbol: str) -> list[dict[str, Any]]:
+        """Events recorded at the symbol's most recent archived report (local only).
+
+        Used by the signal layer as float-side risk context. Returns an empty list
+        when the symbol is unknown or its latest report carried no events.
+        """
+        code = freefloat.normalize_code(symbol)
+        with self._connect() as conn:
+            latest = conn.execute(
+                "SELECT MAX(report_date) AS d FROM freefloat_snapshots WHERE code = ?",
+                (code,),
+            ).fetchone()
+            if latest is None or latest["d"] is None:
+                return []
+            rows = conn.execute(
+                """
+                SELECT report_date, code, event_type, severity,
+                       metric_value, threshold_value, payload_json
+                FROM freefloat_events
+                WHERE code = ? AND report_date = ?
+                ORDER BY id DESC
+                """,
+                (code, str(latest["d"])),
+            ).fetchall()
+        return [
+            {**dict(row), "payload": json.loads(str(row["payload_json"]))}
+            for row in rows
+        ]
+
     def build_symbol_report(self, symbol: str, *, limit: int = 20) -> dict[str, Any]:
         code = freefloat.normalize_code(symbol)
         with self._connect() as conn:

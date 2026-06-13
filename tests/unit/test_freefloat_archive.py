@@ -76,6 +76,29 @@ def test_build_symbol_report_requires_sync(tmp_path: Path) -> None:
         store.build_symbol_report("THYAO")
 
 
+def test_latest_risk_events_returns_latest_report_events(tmp_path: Path) -> None:
+    store = ArchiveStore(tmp_path / "archive.sqlite3")
+    # A sharp ratio drop across two reports => a high-severity ratio_jump_down at
+    # the latest date; the earlier date's events must not leak in.
+    store.sync_records(
+        (_record("THYAO", 40.0, label="10.06.2026", float_shares=400.0),)
+    )
+    store.sync_records(
+        (_record("THYAO", 22.0, label="11.06.2026", float_shares=220.0),)
+    )
+
+    events = store.latest_risk_events("BIST:THYAO")
+
+    assert events  # non-empty
+    assert all(e["report_date"] == "2026-06-11" for e in events)
+    assert "ratio_jump_down" in {e["event_type"] for e in events}
+
+
+def test_latest_risk_events_unknown_symbol_is_empty(tmp_path: Path) -> None:
+    store = ArchiveStore(tmp_path / "archive.sqlite3")
+    assert store.latest_risk_events("NOPE") == []
+
+
 def test_sync_archive_range_walks_full_window(monkeypatch, tmp_path: Path) -> None:
     now = datetime(2026, 6, 12, 9, 0, tzinfo=UTC)
     store = ArchiveStore(tmp_path / "archive.sqlite3", clock=lambda: now)
