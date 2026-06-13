@@ -2,11 +2,12 @@
 from __future__ import annotations
 
 import statistics
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
 import anyio
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
+from pydantic import BaseModel
 
 from ...layers.freefloat_archive import ArchiveStore
 from ...logging_utils import setup_logger
@@ -15,6 +16,12 @@ from ..dependencies import ConnectionManager, get_store, get_ws_manager
 logger = setup_logger("tvcli.floatdash.market")
 
 router = APIRouter(tags=["market"])
+
+
+class SyncRequest(BaseModel):
+    latest: bool = True
+    since: str | None = None
+    until: str | None = None
 
 
 def get_latest_report_date(store: ArchiveStore) -> str | None:
@@ -226,6 +233,39 @@ async def get_api_sync_status(store: ArchiveStore = Depends(get_store)) -> Any:
             except Exception:
                 pass
 
+        # Calculate coverage for the last 30 business days
+        today = datetime.now(UTC).date()
+        since_date = today - timedelta(days=30)
+
+        # business days count
+        total_biz = sum(
+            1
+            for ord_ in range(since_date.toordinal(), today.toordinal() + 1)
+            if date.fromordinal(ord_).weekday() < 5
+        )
+
+        with store._connect() as conn:  # noqa: SLF001
+            stored_row = conn.execute(
+                "SELECT COUNT(DISTINCT report_date) AS n FROM freefloat_reports "
+                "WHERE report_date BETWEEN ? AND ?",
+                (since_date.isoformat(), today.isoformat()),
+            ).fetchone()
+            empty_row = conn.execute(
+                "SELECT COUNT(*) AS n FROM freefloat_missing "
+                "WHERE report_date BETWEEN ? AND ?",
+                (since_date.isoformat(), today.isoformat()),
+            ).fetchone()
+
+        stored_cnt = int(stored_row["n"]) if stored_row else 0
+        empty_cnt = int(empty_row["n"]) if empty_row else 0
+        gaps_list = store.missing_business_days(since_date, today)
+
+        coverage_pct = (
+            round(((stored_cnt + empty_cnt) / total_biz * 100.0), 2)
+            if total_biz > 0
+            else 100.0
+        )
+
         return {
             "sync_state": vap_state,
             "cooldown_active": cooldown_active,
@@ -233,6 +273,16 @@ async def get_api_sync_status(store: ArchiveStore = Depends(get_store)) -> Any:
             "last_report_date": stats.get("last_report_date"),
             "reports_count": stats.get("reports"),
             "symbols_count": stats.get("symbols"),
+            "health": {
+                "since": since_date.isoformat(),
+                "until": today.isoformat(),
+                "total_business_days": total_biz,
+                "stored_days": stored_cnt,
+                "empty_days": empty_cnt,
+                "coverage_pct": coverage_pct,
+                "gaps": [g.isoformat() for g in gaps_list],
+                "gap_count": len(gaps_list),
+            },
         }
     except Exception as e:
         raise HTTPException(
@@ -241,7 +291,13 @@ async def get_api_sync_status(store: ArchiveStore = Depends(get_store)) -> Any:
         ) from e
 
 
-def _bg_sync(store: ArchiveStore, ws_manager: ConnectionManager) -> None:
+def _bg_sync(
+    store: ArchiveStore,
+    ws_manager: ConnectionManager,
+    latest: bool = True,
+    since: date | None = None,
+    until: date | None = None,
+) -> None:
     try:
         from ...layers import freefloat_archive
 
@@ -257,11 +313,11 @@ def _bg_sync(store: ArchiveStore, ws_manager: ConnectionManager) -> None:
         anyio.from_thread.run(ws_manager.broadcast, {"event": "sync_started"})
 
         freefloat_archive.sync_archive(
-            latest=True,
-            since=None,
-            until=None,
+            latest=latest,
+            since=since,
+            until=until,
             max_days=None,
-            resume=False,
+            resume=True if since else False,
             store=store,
             on_progress=progress_callback,
         )
@@ -277,34 +333,56 @@ def _bg_sync(store: ArchiveStore, ws_manager: ConnectionManager) -> None:
 
 @router.post("/api/sync/run")
 async def run_api_sync(
-    background_tasks: BackgroundTasks,
+    payload: SyncRequest | None = None,
+    background_tasks: BackgroundTasks = BackgroundTasks(),
     store: ArchiveStore = Depends(get_store),
     ws_manager: ConnectionManager = Depends(get_ws_manager),
 ) -> Any:
     try:
         logger.info("Starting VAP free-float sync via API")
-        now = datetime.now(UTC)
-        with store._connect() as conn:
-            row = conn.execute(
-                "SELECT cooldown_until FROM sync_state WHERE source = ?",
-                ("vap",),
-            ).fetchone()
-            if row and row["cooldown_until"]:
-                cooldown_time = datetime.fromisoformat(row["cooldown_until"])
-                if cooldown_time > now:
-                    seconds_left = int((cooldown_time - now).total_seconds())
-                    logger.warning(
-                        "Sync request rejected due to active cooldown",
-                        extra={"seconds_left": seconds_left},
-                    )
-                    return {
-                        "success": False,
-                        "message": f"Sync cooldown active. Try again in {seconds_left} seconds.",
-                        "cooldown_active": True,
-                        "cooldown_seconds_left": seconds_left,
-                    }
 
-        background_tasks.add_task(_bg_sync, store, ws_manager)
+        latest = payload.latest if payload else True
+        since = None
+        until = None
+        if payload and payload.since:
+            try:
+                since = date.fromisoformat(payload.since)
+            except ValueError as exc:
+                raise HTTPException(
+                    status_code=400, detail="Invalid since date format (YYYY-MM-DD)"
+                ) from exc
+        if payload and payload.until:
+            try:
+                until = date.fromisoformat(payload.until)
+            except ValueError as exc:
+                raise HTTPException(
+                    status_code=400, detail="Invalid until date format (YYYY-MM-DD)"
+                ) from exc
+
+        # Only apply cooldown check for latest sync (to prevent spamming VAP home page)
+        if latest:
+            now = datetime.now(UTC)
+            with store._connect() as conn:
+                row = conn.execute(
+                    "SELECT cooldown_until FROM sync_state WHERE source = ?",
+                    ("vap",),
+                ).fetchone()
+                if row and row["cooldown_until"]:
+                    cooldown_time = datetime.fromisoformat(row["cooldown_until"])
+                    if cooldown_time > now:
+                        seconds_left = int((cooldown_time - now).total_seconds())
+                        logger.warning(
+                            "Sync request rejected due to active cooldown",
+                            extra={"seconds_left": seconds_left},
+                        )
+                        return {
+                            "success": False,
+                            "message": f"Sync cooldown active. Try again in {seconds_left} seconds.",
+                            "cooldown_active": True,
+                            "cooldown_seconds_left": seconds_left,
+                        }
+
+        background_tasks.add_task(_bg_sync, store, ws_manager, latest, since, until)
         logger.info("Sync task queued successfully in background")
         return {"success": True, "message": "Sync started in background."}
     except Exception as e:

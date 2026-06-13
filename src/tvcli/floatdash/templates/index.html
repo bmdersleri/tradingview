@@ -409,6 +409,7 @@
         <div class="tabs-container" style="display: flex; gap: 0.5rem; margin-right: auto; margin-left: 1.5rem;">
             <button id="tabDashboard" class="btn active-tab" onclick="switchMainTab('dashboard')" style="padding: 0.35rem 0.75rem; font-size: 0.85rem; border-radius: 6px; font-weight: 600;">Dashboard</button>
             <button id="tabAlerts" class="btn" onclick="switchMainTab('alerts')" style="padding: 0.35rem 0.75rem; font-size: 0.85rem; border-radius: 6px; font-weight: 600; background: none; border: 1px solid transparent;">Alarmlar</button>
+            <button id="tabSectors" class="btn" onclick="switchMainTab('sectors')" style="padding: 0.35rem 0.75rem; font-size: 0.85rem; border-radius: 6px; font-weight: 600; background: none; border: 1px solid transparent;">Sektörler</button>
             <button id="tabSettings" class="btn" onclick="switchMainTab('settings')" style="padding: 0.35rem 0.75rem; font-size: 0.85rem; border-radius: 6px; font-weight: 600; background: none; border: 1px solid transparent;">Ayarlar</button>
         </div>
         <div class="search-container">
@@ -438,7 +439,7 @@
             <div id="errorBox" class="error-box"></div>
 
             <div id="dashboardView">
-                <div id="marketInfoBar" class="info-bar">
+                <div id="marketInfoBar" class="info-bar" style="display: grid; grid-template-columns: repeat(5, 1fr); gap: 1rem;">
                 <div class="info-card">
                     <span class="info-label">Piyasa Medyan Oranı</span>
                     <span id="marketMedianRatio" class="info-value">-</span>
@@ -448,12 +449,17 @@
                     <span id="marketTotalSymbols" class="info-value">-</span>
                 </div>
                 <div class="info-card">
-                    <span class="info-label" style="color: var(--bearish);">Risk Oranı Kritik (<10%)</span>
+                    <span class="info-label" style="color: var(--bearish);">Risk Oranı Kritik (&lt;10%)</span>
                     <span id="marketSevereRisk" class="info-value" style="color: var(--bearish);">-</span>
                 </div>
                 <div class="info-card">
                     <span class="info-label" style="color: var(--warning);">Aktif Kritik Alarmlar</span>
                     <span id="marketHighAlerts" class="info-value" style="color: var(--warning);">-</span>
+                </div>
+                <div class="info-card" onclick="showDataHealthDetails()" style="cursor: pointer; position: relative; border-color: rgba(38, 166, 154, 0.4);">
+                    <span class="info-label" style="color: var(--bullish);">Veri Sağlığı (Son 30g)</span>
+                    <span id="dataHealthPct" class="info-value" style="color: var(--bullish);">-</span>
+                    <span style="font-size: 0.65rem; color: var(--text-secondary); display: block; margin-top: 0.2rem;">Detaylar için tıklayın</span>
                 </div>
             </div>
 
@@ -830,6 +836,46 @@
                     </div>
                 </div>
             </div>
+
+            <!-- Sectors Tab View -->
+            <div id="sectorsView" style="display: none; flex-direction: column; gap: 1.5rem; max-width: 1200px; margin: 0 auto; width: 100%;">
+                <div class="card">
+                    <h3 style="margin-bottom: 0.5rem; display: flex; align-items: center; gap: 0.5rem; color: var(--accent-color);">
+                        <span>🗂️</span> Sektörel Analiz & Isı Haritası
+                    </h3>
+                    <p style="font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 1.5rem;">
+                        BIST şirketlerinin serbest dolaşım oranlarını sektörel dağılıma ve sermaye ağırlığına göre analiz edin. Sektör kartlarına tıklayarak sol listede filtreleme yapabilirsiniz.
+                    </p>
+                    
+                    <div id="sectorsGrid" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 1rem;">
+                        <!-- Sector Cards will be generated dynamically -->
+                    </div>
+                </div>
+
+                <!-- Sector Detail Table Card -->
+                <div id="sectorDetailCard" class="card" style="display: none; margin-top: 1rem;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; border-bottom: 1px solid var(--border-color); padding-bottom: 0.5rem;">
+                        <h4 id="sectorDetailTitle" style="color: var(--accent-color); font-size: 1.05rem;">Sektör Detayı</h4>
+                        <button onclick="clearSectorFilter()" class="btn" style="padding: 0.25rem 0.6rem; font-size: 0.8rem; background-color: transparent; border: 1px solid var(--border-color); color: var(--text-primary);">Filtreyi Temizle</button>
+                    </div>
+                    <div style="overflow-x: auto;">
+                        <table class="dashboard-table" style="width: 100%; border-collapse: collapse; text-align: left; font-size: 0.85rem;">
+                            <thead>
+                                <tr style="border-bottom: 1px solid var(--border-color); color: var(--text-secondary);">
+                                    <th style="padding: 0.5rem; width: 100px;">Kod</th>
+                                    <th style="padding: 0.5rem;">Şirket Adı</th>
+                                    <th style="padding: 0.5rem; text-align: right; width: 180px;">Fiili Dolaşım Oranı (%)</th>
+                                    <th style="padding: 0.5rem; text-align: right; width: 180px;">Sermaye (TL)</th>
+                                    <th style="padding: 0.5rem;">Endüstri</th>
+                                </tr>
+                            </thead>
+                            <tbody id="sectorDetailTableBody">
+                                <!-- Dynamic rows -->
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
             
             <!-- KAP Detail Modal -->
             <div id="kapModal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0, 0, 0, 0.65); z-index: 1000; align-items: center; justify-content: center; backdrop-filter: blur(4px);">
@@ -846,11 +892,56 @@
                     </div>
                 </div>
             </div>
+            
+            <!-- Data Health Modal -->
+            <div id="healthModal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0, 0, 0, 0.65); z-index: 1000; align-items: center; justify-content: center; backdrop-filter: blur(4px);">
+                <div class="card" style="width: 90%; max-width: 500px; max-height: 80%; overflow-y: auto; position: relative; display: flex; flex-direction: column; gap: 1.2rem; border-color: var(--accent-color);">
+                    <span onclick="closeHealthModal()" style="position: absolute; top: 15px; right: 20px; cursor: pointer; color: var(--text-secondary); font-size: 1.5rem; user-select: none;">&times;</span>
+                    <h3 style="color: var(--accent-color); font-size: 1.15rem; display: flex; align-items: center; gap: 0.5rem;">
+                        <span>🟢</span> Veri Sağlığı Detayları (Son 30g)
+                    </h3>
+                    <div style="display: flex; flex-direction: column; gap: 0.75rem; border-bottom: 1px solid var(--border-color); padding-bottom: 1rem;">
+                        <div style="display: flex; justify-content: space-between; font-size: 0.9rem;">
+                            <span style="color: var(--text-secondary);">Hedef Aralık:</span>
+                            <span id="healthDateRange" style="color: var(--text-primary); font-weight: 500;">-</span>
+                        </div>
+                        <div style="display: flex; justify-content: space-between; font-size: 0.9rem;">
+                            <span style="color: var(--text-secondary);">Toplam İş Günü:</span>
+                            <span id="healthTotalBiz" style="color: var(--text-primary); font-weight: 500;">-</span>
+                        </div>
+                        <div style="display: flex; justify-content: space-between; font-size: 0.9rem;">
+                            <span style="color: var(--text-secondary);">Yüklü Rapor Sayısı:</span>
+                            <span id="healthStored" style="color: var(--text-primary); font-weight: 500;">-</span>
+                        </div>
+                        <div style="display: flex; justify-content: space-between; font-size: 0.9rem;">
+                            <span style="color: var(--text-secondary);">Resmi Tatiller (Boş Günler):</span>
+                            <span id="healthEmpty" style="color: var(--text-primary); font-weight: 500;">-</span>
+                        </div>
+                        <div style="display: flex; justify-content: space-between; font-size: 0.9rem;">
+                            <span style="color: var(--text-secondary);">Veri Kapsama Oranı:</span>
+                            <span id="healthCoveragePct" style="color: var(--bullish); font-weight: 600;">-%</span>
+                        </div>
+                    </div>
+                    
+                    <div>
+                        <h4 style="font-size: 0.95rem; margin-bottom: 0.5rem; color: var(--text-primary);">Eksik Rapor Tarihleri</h4>
+                        <div id="healthGapsContainer" style="max-height: 120px; overflow-y: auto; background-color: #1e222d; border-radius: 6px; padding: 0.5rem; border: 1px solid var(--border-color); font-size: 0.85rem; display: flex; flex-wrap: wrap; gap: 0.5rem;">
+                            <!-- Gap list tags will go here -->
+                        </div>
+                    </div>
+
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 0.5rem;">
+                        <button onclick="closeHealthModal()" class="btn" style="background-color: transparent; border: 1px solid var(--border-color); color: var(--text-primary);">Kapat</button>
+                        <button id="healthBackfillBtn" onclick="triggerBackfillGaps()" class="btn" style="background-color: var(--accent-color); color: white;">Eksik Günleri Eşitle (Backfill)</button>
+                    </div>
+                </div>
+            </div>
         </main>
         </div>
 
     <script>
         let activeCode = 'MARKET';
+        let cachedSyncStatus = null;
         let cachedMarketData = null;
         let activeSymbolData = null;
         let activeKapDisclosures = [];
@@ -2162,6 +2253,21 @@
                 if (!response.ok) return;
                 const data = await response.json();
 
+                cachedSyncStatus = data;
+                if (data.health) {
+                    const healthPctEl = document.getElementById('dataHealthPct');
+                    if (healthPctEl) {
+                        healthPctEl.innerText = `${data.health.coverage_pct}%`;
+                        if (data.health.coverage_pct < 80.0) {
+                            healthPctEl.style.color = 'var(--bearish)';
+                        } else if (data.health.coverage_pct < 95.0) {
+                            healthPctEl.style.color = 'var(--warning)';
+                        } else {
+                            healthPctEl.style.color = 'var(--bullish)';
+                        }
+                    }
+                }
+
                 const dot = document.getElementById('syncStatusDot');
                 const text = document.getElementById('syncStatusText');
                 const btn = document.getElementById('syncNowBtn');
@@ -2306,18 +2412,280 @@
         function switchMainTab(tabName) {
             document.getElementById('tabDashboard').classList.toggle('active-tab', tabName === 'dashboard');
             document.getElementById('tabAlerts').classList.toggle('active-tab', tabName === 'alerts');
+            document.getElementById('tabSectors').classList.toggle('active-tab', tabName === 'sectors');
             document.getElementById('tabSettings').classList.toggle('active-tab', tabName === 'settings');
 
             document.getElementById('dashboardView').style.display = (tabName === 'dashboard') ? 'block' : 'none';
             document.getElementById('alertsHistoryView').style.display = (tabName === 'alerts') ? 'flex' : 'none';
+            document.getElementById('sectorsView').style.display = (tabName === 'sectors') ? 'flex' : 'none';
             document.getElementById('settingsView').style.display = (tabName === 'settings') ? 'flex' : 'none';
 
             if (tabName === 'alerts') {
                 fetchAlertsHistory();
+            } else if (tabName === 'sectors') {
+                fetchSectorsHeatmap();
             } else if (tabName === 'settings') {
                 fetchSettings();
             }
         }
+
+        let activeSectorFilter = null;
+        let sectorDataList = [];
+
+        async function fetchSectorsHeatmap() {
+            const grid = document.getElementById('sectorsGrid');
+            if (!grid) return;
+
+            grid.innerHTML = '<div style="color: var(--text-secondary); padding: 2rem;">Sektörler yükleniyor...</div>';
+
+            try {
+                const response = await fetch('/api/market/sectors');
+                if (!response.ok) throw new Error("Sektörel veriler alınamadı.");
+                const data = await response.json();
+                sectorDataList = data; // Save globally
+
+                grid.innerHTML = '';
+                if (data.length === 0) {
+                    grid.innerHTML = '<div style="color: var(--text-secondary); padding: 2rem;">Kayıtlı sektörel veri bulunamadı.</div>';
+                    return;
+                }
+
+                data.forEach(sec => {
+                    const card = document.createElement('div');
+                    card.className = 'card';
+                    card.style.cursor = 'pointer';
+                    card.style.transition = 'all 0.2s';
+                    card.style.display = 'flex';
+                    card.style.flexDirection = 'column';
+                    card.style.gap = '0.5rem';
+                    card.style.borderLeft = `4px solid ${getSectorColor(sec.median_ratio)}`;
+                    if (activeSectorFilter === sec.sector) {
+                        card.style.backgroundColor = 'rgba(38, 166, 154, 0.15)';
+                        card.style.borderColor = 'var(--accent-color)';
+                    }
+
+                    card.onclick = () => selectSector(sec);
+
+                    card.innerHTML = `
+                        <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 0.5rem;">
+                            <span style="font-weight: 600; font-size: 0.95rem; color: var(--text-primary);">${sec.sector}</span>
+                            <span style="font-size: 0.75rem; background-color: rgba(255,255,255,0.05); padding: 0.15rem 0.45rem; border-radius: 4px; color: var(--text-secondary);">${sec.symbol_count} Hisse</span>
+                        </div>
+                        <div style="display: flex; justify-content: space-between; margin-top: 0.5rem; font-size: 0.85rem;">
+                            <span style="color: var(--text-secondary);">Medyan Fiili Dolaşım:</span>
+                            <span style="font-weight: 600; color: ${getSectorColor(sec.median_ratio)};">${sec.median_ratio}%</span>
+                        </div>
+                        <div style="display: flex; justify-content: space-between; font-size: 0.85rem;">
+                            <span style="color: var(--text-secondary);">Ort. Fiili Dolaşım:</span>
+                            <span style="font-weight: 500; color: var(--text-primary);">${sec.avg_ratio}%</span>
+                        </div>
+                    `;
+                    grid.appendChild(card);
+                });
+            } catch (err) {
+                console.error(err);
+                grid.innerHTML = `<div style="color: var(--bearish); padding: 2rem;">Hata: ${err.message}</div>`;
+            }
+        }
+
+        function getSectorColor(ratio) {
+            if (ratio < 10) return 'var(--bearish)';
+            if (ratio < 20) return 'var(--warning)';
+            return 'var(--bullish)';
+        }
+
+        function selectSector(secData) {
+            // Toggle filter if clicked again
+            if (activeSectorFilter === secData.sector) {
+                clearSectorFilter();
+                return;
+            }
+
+            activeSectorFilter = secData.sector;
+            
+            // Re-render heatmap to show active state
+            fetchSectorsHeatmap();
+            
+            // Filter Sidebar Leaderboard
+            filterLeaderboardBySector(secData);
+            
+            // Display Detail Table
+            showSectorDetail(secData);
+        }
+
+        function filterLeaderboardBySector(secData) {
+            const codes = secData.symbols.map(s => s.code);
+            const listItems = document.querySelectorAll('#leaderboardList .leaderboard-item');
+            
+            listItems.forEach(item => {
+                const id = item.id;
+                if (id === 'item-market') {
+                    // Always show Market Overview
+                    item.style.display = 'block';
+                } else {
+                    const symbolCode = id.replace('item-', '');
+                    if (codes.includes(symbolCode)) {
+                        item.style.display = 'block';
+                    } else {
+                        item.style.display = 'none';
+                    }
+                }
+            });
+        }
+
+        function showSectorDetail(secData) {
+            const detailCard = document.getElementById('sectorDetailCard');
+            const title = document.getElementById('sectorDetailTitle');
+            const tbody = document.getElementById('sectorDetailTableBody');
+            
+            if (!detailCard || !tbody || !title) return;
+            
+            title.innerText = `${secData.sector} Sektörü Şirketleri Detayı`;
+            tbody.innerHTML = '';
+            
+            secData.symbols.forEach(sym => {
+                const tr = document.createElement('tr');
+                tr.style.borderBottom = '1px solid var(--border-color)';
+                tr.style.cursor = 'pointer';
+                tr.onclick = () => {
+                    switchMainTab('dashboard');
+                    loadSymbol(sym.code);
+                };
+                
+                tr.innerHTML = `
+                    <td style="padding: 0.65rem 0.5rem; font-weight: 600; color: var(--accent-color);">${sym.code}</td>
+                    <td style="padding: 0.65rem 0.5rem; color: var(--text-primary);">${sym.name}</td>
+                    <td style="padding: 0.65rem 0.5rem; text-align: right; font-weight: 600; color: ${getSectorColor(sym.ratio)};">${sym.ratio.toFixed(2)}%</td>
+                    <td style="padding: 0.65rem 0.5rem; text-align: right; color: var(--text-primary);">${sym.capital.toLocaleString('tr-TR')}</td>
+                    <td style="padding: 0.65rem 0.5rem; color: var(--text-secondary);">${sym.industry}</td>
+                `;
+                tbody.appendChild(tr);
+            });
+            
+            detailCard.style.display = 'block';
+        }
+
+        function clearSectorFilter() {
+            activeSectorFilter = null;
+            
+            // Re-render heatmap to clear active states
+            fetchSectorsHeatmap();
+            
+            // Show all leaderboard items
+            const listItems = document.querySelectorAll('#leaderboardList .leaderboard-item');
+            listItems.forEach(item => {
+                item.style.display = 'block';
+            });
+            
+            // Hide detail card
+            const detailCard = document.getElementById('sectorDetailCard');
+            if (detailCard) detailCard.style.display = 'none';
+        }
+
+        function showDataHealthDetails() {
+            if (!cachedSyncStatus || !cachedSyncStatus.health) {
+                alert("Veri sağlığı bilgisi henüz yüklenmedi.");
+                return;
+            }
+
+            const h = cachedSyncStatus.health;
+            
+            document.getElementById('healthDateRange').innerText = `${parseDateLabel(h.since)} - ${parseDateLabel(h.until)}`;
+            document.getElementById('healthTotalBiz').innerText = `${h.total_business_days} Gün`;
+            document.getElementById('healthStored').innerText = `${h.stored_days} Rapor`;
+            document.getElementById('healthEmpty').innerText = `${h.empty_days} Gün`;
+            
+            const covEl = document.getElementById('healthCoveragePct');
+            covEl.innerText = `${h.coverage_pct}%`;
+            if (h.coverage_pct < 80.0) {
+                covEl.style.color = 'var(--bearish)';
+            } else if (h.coverage_pct < 95.0) {
+                covEl.style.color = 'var(--warning)';
+            } else {
+                covEl.style.color = 'var(--bullish)';
+            }
+
+            const gapsContainer = document.getElementById('healthGapsContainer');
+            gapsContainer.innerHTML = '';
+            
+            if (h.gaps.length === 0) {
+                gapsContainer.innerHTML = '<span style="color: var(--text-secondary);">Eksik rapor bulunmamaktadır. Veri seti tamdır. ✅</span>';
+                document.getElementById('healthBackfillBtn').disabled = true;
+                document.getElementById('healthBackfillBtn').style.opacity = '0.5';
+            } else {
+                h.gaps.forEach(g => {
+                    const tag = document.createElement('span');
+                    tag.style.backgroundColor = 'rgba(239, 83, 80, 0.15)';
+                    tag.style.border = '1px solid var(--bearish)';
+                    tag.style.color = 'var(--bearish)';
+                    tag.style.padding = '0.15rem 0.45rem';
+                    tag.style.borderRadius = '4px';
+                    tag.style.fontSize = '0.75rem';
+                    tag.innerText = parseDateLabel(g);
+                    gapsContainer.appendChild(tag);
+                });
+                document.getElementById('healthBackfillBtn').disabled = false;
+                document.getElementById('healthBackfillBtn').style.opacity = '1';
+            }
+
+            document.getElementById('healthModal').style.display = 'flex';
+        }
+
+        function closeHealthModal() {
+            document.getElementById('healthModal').style.display = 'none';
+        }
+
+        async function triggerBackfillGaps() {
+            if (!cachedSyncStatus || !cachedSyncStatus.health || cachedSyncStatus.health.gaps.length === 0) {
+                return;
+            }
+            
+            const gaps = cachedSyncStatus.health.gaps;
+            const sortedGaps = [...gaps].sort();
+            const since = sortedGaps[0];
+            const until = sortedGaps[sortedGaps.length - 1];
+
+            if (!confirm(`Eksik olan ${gaps.length} günü (${parseDateLabel(since)} - ${parseDateLabel(until)} arası) arka planda eşitlemek istediğinizden emin misiniz?`)) {
+                return;
+            }
+
+            closeHealthModal();
+
+            const btn = document.getElementById('syncNowBtn');
+            btn.disabled = true;
+            btn.innerText = 'Eşitleniyor...';
+
+            try {
+                const response = await fetch('/api/sync/run', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        latest: false,
+                        since: since,
+                        until: until
+                    })
+                });
+
+                if (!response.ok) {
+                    alert("Senkronizasyon isteği başarısız oldu.");
+                    updateSyncStatusHeader();
+                    return;
+                }
+
+                const data = await response.json();
+                if (data.success) {
+                    updateSyncStatusHeader();
+                } else {
+                    alert(data.message);
+                    updateSyncStatusHeader();
+                }
+            } catch (err) {
+                console.error("Failed to start backfill sync:", err);
+                alert("Eşitleme başlatılırken bağlantı hatası oluştu.");
+                updateSyncStatusHeader();
+            }
+        }
+
 
         function showKapModal(disclosure) {
             document.getElementById('kapModalTitle').innerText = disclosure.title || 'KAP Açıklaması';
