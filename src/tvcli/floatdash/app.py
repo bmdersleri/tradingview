@@ -13,6 +13,7 @@ from typing import Any
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Request, Response, status
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import FileResponse, HTMLResponse
+from pydantic import BaseModel, Field
 
 from ..layers import freefloat_archive
 from ..layers.float_dashboard import DashboardRequest, run_dashboard
@@ -20,7 +21,6 @@ from ..logging_utils import setup_logger
 
 logger = setup_logger("tvcli.floatdash")
 
-from pydantic import BaseModel, Field
 
 class SettingsUpdate(BaseModel):
     telegram_token: str | None = None
@@ -29,6 +29,7 @@ class SettingsUpdate(BaseModel):
     low_float_threshold: float = Field(20.0, ge=0.0, le=100.0)
     severe_low_float_threshold: float = Field(10.0, ge=0.0, le=100.0)
     ratio_jump_threshold: float = Field(5.0, ge=0.0, le=100.0)
+
 
 class SettingsTest(BaseModel):
     telegram_token: str | None = None
@@ -888,13 +889,30 @@ def create_app(store: freefloat_archive.ArchiveStore | None = None) -> FastAPI:
                     </form>
                 </div>
             </div>
+            
+            <!-- KAP Detail Modal -->
+            <div id="kapModal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0, 0, 0, 0.65); z-index: 1000; align-items: center; justify-content: center; backdrop-filter: blur(4px);">
+                <div class="card" style="width: 90%; max-width: 600px; max-height: 80%; overflow-y: auto; position: relative; display: flex; flex-direction: column; gap: 1rem; border-color: var(--accent-color);">
+                    <span onclick="closeKapModal()" style="position: absolute; top: 15px; right: 20px; cursor: pointer; color: var(--text-secondary); font-size: 1.5rem; user-select: none;">&times;</span>
+                    <h3 id="kapModalTitle" style="color: var(--accent-color); padding-right: 20px; font-size: 1.15rem; line-height: 1.4;">KAP Açıklaması</h3>
+                    <div style="display: flex; justify-content: space-between; font-size: 0.8rem; color: var(--text-secondary); border-bottom: 1px solid var(--border-color); padding-bottom: 0.5rem;">
+                        <span id="kapModalDate">-</span>
+                        <span id="kapModalSymbol" style="font-weight: 600; color: var(--accent-color);">-</span>
+                    </div>
+                    <p id="kapModalSummary" style="font-size: 0.95rem; line-height: 1.6; color: var(--text-primary); white-space: pre-wrap; margin-top: 0.5rem;"></p>
+                    <div style="display: flex; justify-content: flex-end; margin-top: 1rem;">
+                        <a id="kapModalLink" href="#" target="_blank" class="btn" style="text-decoration: none; padding: 0.5rem 1rem; font-size: 0.85rem;">KAP Resmi Sayfası ↗</a>
+                    </div>
+                </div>
+            </div>
         </main>
-    </div>
+        </div>
 
     <script>
         let activeCode = 'MARKET';
         let cachedMarketData = null;
         let activeSymbolData = null;
+        let activeKapDisclosures = [];
         let compareSymbols = [];
         let compareDataStore = {};
         const compareColors = ['#ef5350', '#ffaa00', '#9c27b0', '#00b0ff'];
@@ -1154,6 +1172,20 @@ def create_app(store: freefloat_archive.ArchiveStore | None = None) -> FastAPI:
             });
             areaSeries.setData(ratioData);
 
+            // Seed KAP timeline markers
+            if (activeKapDisclosures && activeKapDisclosures.length > 0) {
+                const markers = activeKapDisclosures.map(disclosure => ({
+                    time: parseDateToISO(disclosure.disclosure_date),
+                    position: 'aboveBar',
+                    color: '#ffaa00',
+                    shape: 'pin',
+                    text: 'KAP',
+                    id: `kap_${disclosure.id}`
+                })).filter(m => m.time);
+                markers.sort((a, b) => a.time.localeCompare(b.time));
+                areaSeries.setMarkers(markers);
+            }
+
             smaSeries = ratioChartInstance.addLineSeries({
                 color: '#ffaa00',
                 lineWidth: 1.5,
@@ -1325,6 +1357,19 @@ def create_app(store: freefloat_archive.ArchiveStore | None = None) -> FastAPI:
 
             updateSymbolCharts();
             ratioChartInstance.timeScale().fitContent();
+
+            // Subscribe to KAP timeline markers click event
+            ratioChartInstance.subscribeClick(param => {
+                if (!param || !param.point) return;
+                const markerId = param.hoveredObjectId;
+                if (markerId && markerId.startsWith('kap_')) {
+                    const id = parseInt(markerId.split('_')[1], 10);
+                    const disclosure = activeKapDisclosures.find(d => d.id === id);
+                    if (disclosure) {
+                        showKapModal(disclosure);
+                    }
+                }
+            });
         }
 
         function updateSymbolCharts() {
@@ -1770,14 +1815,19 @@ def create_app(store: freefloat_archive.ArchiveStore | None = None) -> FastAPI:
             showLoader(`Generating Deep-Dive for ${activeCode}...`);
 
             try {
-                const response = await fetch(`/api/symbol/${activeCode}`);
-                if (!response.ok) {
+                const [symResponse, kapResponse] = await Promise.all([
+                    fetch(`/api/symbol/${activeCode}`),
+                    fetch(`/api/symbol/${activeCode}/kap`)
+                ]);
+
+                if (!symResponse.ok) {
                     hideLoader();
                     handleImageError();
                     return;
                 }
-                const data = await response.json();
+                const data = await symResponse.json();
                 activeSymbolData = data;
+                activeKapDisclosures = kapResponse.ok ? await kapResponse.json() : [];
 
                 document.getElementById('infoSymbol').innerText = `${data.identity.code} / ${data.identity.name}`;
                 document.getElementById('infoRatio').innerText = `${data.latest.ratio.toFixed(2)}%`;
@@ -2267,6 +2317,33 @@ def create_app(store: freefloat_archive.ArchiveStore | None = None) -> FastAPI:
                 fetchSettings();
             }
         }
+
+        function showKapModal(disclosure) {
+            document.getElementById('kapModalTitle').innerText = disclosure.title || 'KAP Açıklaması';
+            document.getElementById('kapModalDate').innerText = disclosure.disclosure_date || '-';
+            document.getElementById('kapModalSymbol').innerText = disclosure.code || '-';
+            document.getElementById('kapModalSummary').innerText = disclosure.summary || '';
+            const linkEl = document.getElementById('kapModalLink');
+            if (disclosure.url) {
+                linkEl.href = disclosure.url;
+                linkEl.style.display = 'inline-block';
+            } else {
+                linkEl.style.display = 'none';
+            }
+            document.getElementById('kapModal').style.display = 'flex';
+        }
+
+        function closeKapModal() {
+            document.getElementById('kapModal').style.display = 'none';
+        }
+
+        // Close KAP Modal on click outside
+        window.addEventListener('click', event => {
+            const modal = document.getElementById('kapModal');
+            if (event.target === modal) {
+                closeKapModal();
+            }
+        });
 
         function fetchSettings() {
             fetch('/api/settings')
@@ -2907,12 +2984,15 @@ def create_app(store: freefloat_archive.ArchiveStore | None = None) -> FastAPI:
     async def get_settings() -> Any:
         try:
             from ..config import load_config, resolve_setting
+
             cfg = load_config()
             token = resolve_setting("alerts", "telegram-token", cfg, "")
             chat_id = resolve_setting("alerts", "telegram-chat-id", cfg, "")
             webhook_url = resolve_setting("alerts", "webhook-url", cfg, "")
             low_float = resolve_setting("alerts", "low-float-threshold", cfg, 20.0)
-            severe_low_float = resolve_setting("alerts", "severe-low-float-threshold", cfg, 10.0)
+            severe_low_float = resolve_setting(
+                "alerts", "severe-low-float-threshold", cfg, 10.0
+            )
             ratio_jump = resolve_setting("alerts", "ratio-jump-threshold", cfg, 5.0)
 
             masked_token = ""
@@ -2939,7 +3019,8 @@ def create_app(store: freefloat_archive.ArchiveStore | None = None) -> FastAPI:
     @app.post("/api/settings/update")
     async def update_settings(payload: SettingsUpdate) -> Any:
         try:
-            from ..config import load_config, save_config, resolve_setting
+            from ..config import load_config, resolve_setting, save_config
+
             cfg = load_config()
 
             if "alerts" not in cfg:
@@ -2953,7 +3034,9 @@ def create_app(store: freefloat_archive.ArchiveStore | None = None) -> FastAPI:
             cfg["alerts"]["telegram-chat-id"] = payload.telegram_chat_id or ""
             cfg["alerts"]["webhook-url"] = payload.webhook_url or ""
             cfg["alerts"]["low-float-threshold"] = payload.low_float_threshold
-            cfg["alerts"]["severe-low-float-threshold"] = payload.severe_low_float_threshold
+            cfg["alerts"]["severe-low-float-threshold"] = (
+                payload.severe_low_float_threshold
+            )
             cfg["alerts"]["ratio-jump-threshold"] = payload.ratio_jump_threshold
 
             save_config(cfg)
@@ -2967,9 +3050,10 @@ def create_app(store: freefloat_archive.ArchiveStore | None = None) -> FastAPI:
     @app.post("/api/settings/test")
     async def test_settings(payload: SettingsTest) -> Any:
         import httpx
+
         from ..config import load_config, resolve_setting
+
         errors = []
-        success = False
 
         token = payload.telegram_token
         if token and "*" in token:
@@ -2983,11 +3067,15 @@ def create_app(store: freefloat_archive.ArchiveStore | None = None) -> FastAPI:
             try:
                 url = f"https://api.telegram.org/bot{token}/sendMessage"
                 text = "⚡ <b>tvcli Test Alarmı:</b> Telegram bildirim kanalı bağlantısı başarıyla doğrulandı! ✅"
-                res = httpx.post(url, json={"chat_id": chat_id, "text": text, "parse_mode": "HTML"}, timeout=5.0)
+                res = httpx.post(
+                    url,
+                    json={"chat_id": chat_id, "text": text, "parse_mode": "HTML"},
+                    timeout=5.0,
+                )
                 if res.status_code != 200:
-                    errors.append(f"Telegram API returned status {res.status_code}: {res.text}")
-                else:
-                    success = True
+                    errors.append(
+                        f"Telegram API returned status {res.status_code}: {res.text}"
+                    )
             except Exception as e:
                 errors.append(f"Telegram connection error: {str(e)}")
 
@@ -3002,20 +3090,25 @@ def create_app(store: freefloat_archive.ArchiveStore | None = None) -> FastAPI:
                             "severity": "info",
                             "metric_value": 0.0,
                             "threshold_value": 0.0,
-                            "payload": {"message": "tvcli Test Alarmı: Webhook bağlantısı başarıyla doğrulandı! ✅"}
+                            "payload": {
+                                "message": "tvcli Test Alarmı: Webhook bağlantısı başarıyla doğrulandı! ✅"
+                            },
                         }
-                    ]
+                    ],
                 }
                 res = httpx.post(webhook_url, json=test_payload, timeout=5.0)
                 if res.status_code not in (200, 201, 204):
-                    errors.append(f"Webhook returned status {res.status_code}: {res.text}")
-                else:
-                    success = True
+                    errors.append(
+                        f"Webhook returned status {res.status_code}: {res.text}"
+                    )
             except Exception as e:
                 errors.append(f"Webhook connection error: {str(e)}")
 
         if not token and not chat_id and not webhook_url:
-            return {"status": "error", "message": "No alert channel configured to test."}
+            return {
+                "status": "error",
+                "message": "No alert channel configured to test.",
+            }
 
         if errors:
             return {"status": "error", "message": "; ".join(errors)}
@@ -3036,7 +3129,7 @@ def create_app(store: freefloat_archive.ArchiveStore | None = None) -> FastAPI:
                 FROM freefloat_events
                 WHERE 1=1
             """
-            params = []
+            params: list[Any] = []
             if symbol:
                 query += " AND code = ?"
                 params.append(symbol.upper())
@@ -3058,17 +3151,52 @@ def create_app(store: freefloat_archive.ArchiveStore | None = None) -> FastAPI:
 
             results = []
             for row in rows:
-                results.append({
-                    "id": row["id"],
-                    "report_date": row["report_date"],
-                    "code": row["code"],
-                    "event_type": row["event_type"],
-                    "severity": row["severity"],
-                    "metric_value": row["metric_value"],
-                    "threshold_value": row["threshold_value"],
-                    "payload": json.loads(row["payload_json"]),
-                    "status": row["status"] if row["status"] is not None else "sent",
-                })
+                results.append(
+                    {
+                        "id": row["id"],
+                        "report_date": row["report_date"],
+                        "code": row["code"],
+                        "event_type": row["event_type"],
+                        "severity": row["severity"],
+                        "metric_value": row["metric_value"],
+                        "threshold_value": row["threshold_value"],
+                        "payload": json.loads(row["payload_json"]),
+                        "status": row["status"]
+                        if row["status"] is not None
+                        else "sent",
+                    }
+                )
+            return results
+        except Exception as e:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=str(e),
+            ) from e
+
+    @app.get("/api/symbol/{code}/kap")
+    async def get_symbol_kap(code: str) -> Any:
+        try:
+            query = """
+                SELECT id, code, disclosure_date, title, summary, url
+                FROM kap_disclosures
+                WHERE code = ?
+                ORDER BY disclosure_date DESC
+            """
+            with store._connect() as conn:
+                rows = conn.execute(query, (code.upper(),)).fetchall()
+
+            results = []
+            for row in rows:
+                results.append(
+                    {
+                        "id": row["id"],
+                        "code": row["code"],
+                        "disclosure_date": row["disclosure_date"],
+                        "title": row["title"],
+                        "summary": row["summary"],
+                        "url": row["url"],
+                    }
+                )
             return results
         except Exception as e:
             raise HTTPException(

@@ -1,15 +1,13 @@
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 import anyio
 import httpx
-import pytest
 
+from tvcli.config import load_config
 from tvcli.floatdash.app import create_app
 from tvcli.layers.freefloat_archive import ArchiveStore
-from tvcli.config import load_config
 
 
 def test_settings_and_alerts_apis(monkeypatch, tmp_path: Path) -> None:
@@ -30,20 +28,56 @@ def test_settings_and_alerts_apis(monkeypatch, tmp_path: Path) -> None:
         conn.execute(
             """
             INSERT INTO freefloat_events(
-                report_date, code, event_type, severity, metric_value, threshold_value, payload_json, status
+                report_date, code, event_type, severity,
+                metric_value, threshold_value, payload_json, status
             )
             VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            ("2026-06-10", "THYAO", "liquidity_risk_low_float", "high", 8.5, 10.0, '{"ratio": 8.5}', "sent"),
+            (
+                "2026-06-10",
+                "THYAO",
+                "liquidity_risk_low_float",
+                "high",
+                8.5,
+                10.0,
+                '{"ratio": 8.5}',
+                "sent",
+            ),
         )
         conn.execute(
             """
             INSERT INTO freefloat_events(
-                report_date, code, event_type, severity, metric_value, threshold_value, payload_json, status
+                report_date, code, event_type, severity,
+                metric_value, threshold_value, payload_json, status
             )
             VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            ("2026-06-11", "GARAN", "ratio_jump_up", "medium", 5.2, 5.0, '{"delta": 5.2}', "failed"),
+            (
+                "2026-06-11",
+                "GARAN",
+                "ratio_jump_up",
+                "medium",
+                5.2,
+                5.0,
+                '{"delta": 5.2}',
+                "failed",
+            ),
+        )
+        conn.execute(
+            """
+            INSERT INTO kap_disclosures (
+                code, disclosure_date, title, summary, url, fetched_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "THYAO",
+                "2026-06-10",
+                "Fiili Dolaşım Pay Oranı Değişikliği",
+                "Güncelleme",
+                "http://kap.org/thyao",
+                "2026-06-10T12:00:00",
+            ),
         )
 
     async def run_test() -> None:
@@ -90,14 +124,18 @@ def test_settings_and_alerts_apis(monkeypatch, tmp_path: Path) -> None:
 
             # Test updating other fields while keeping masked token
             update_payload2 = {
-                "telegram_token": data2["telegram_token"],  # Resubmitting the masked token
+                "telegram_token": data2[
+                    "telegram_token"
+                ],  # Resubmitting the masked token
                 "telegram_chat_id": "-100222",
                 "webhook_url": "http://example.com/webhook",
                 "low_float_threshold": 18.5,
                 "severe_low_float_threshold": 8.5,
                 "ratio_jump_threshold": 6.2,
             }
-            resp_update2 = await client.post("/api/settings/update", json=update_payload2)
+            resp_update2 = await client.post(
+                "/api/settings/update", json=update_payload2
+            )
             assert resp_update2.status_code == 200
 
             # The token in config should remain unmasked
@@ -128,5 +166,20 @@ def test_settings_and_alerts_apis(monkeypatch, tmp_path: Path) -> None:
             failed = resp_failed.json()
             assert len(failed) == 1
             assert failed[0]["code"] == "GARAN"
+
+            # Test KAP endpoint for THYAO
+            resp_kap = await client.get("/api/symbol/THYAO/kap")
+            assert resp_kap.status_code == 200
+            kaps = resp_kap.json()
+            assert len(kaps) == 1
+            assert kaps[0]["code"] == "THYAO"
+            assert kaps[0]["title"] == "Fiili Dolaşım Pay Oranı Değişikliği"
+            assert kaps[0]["summary"] == "Güncelleme"
+            assert kaps[0]["url"] == "http://kap.org/thyao"
+
+            # Test KAP endpoint for GARAN (should be empty)
+            resp_kap_empty = await client.get("/api/symbol/GARAN/kap")
+            assert resp_kap_empty.status_code == 200
+            assert len(resp_kap_empty.json()) == 0
 
     anyio.run(run_test)

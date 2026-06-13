@@ -4,20 +4,20 @@ This plan details the step-by-step roadmap for implementing interactive technica
 
 ---
 
-## Phase 1: Interactive Technical Indicators (WMA, BBands, RSI, MACD)
+## Phase 1: Interactive Technical Indicators (WMA, BBands, RSI, MACD) [COMPLETED]
 
 Integrate WMA 20, Bollinger Bands (20, 2), RSI 14, and MACD (12, 26, 9) indicators directly into the dashboard. Controls (checkboxes) and sub-charts must render and sync dynamically.
 
-### Step 1.1: Complete JS Chart Rendering & Reset Logic (`createSymbolCharts`)
+### Step 1.1: Complete JS Chart Rendering & Reset Logic (`createSymbolCharts`) [COMPLETED]
 - Clear any existing indicator series (`wmaSeries`, `bbBasisSeries`, `bbUpperSeries`, `bbLowerSeries`, `rsiSeries`, `macdLineSeries`, `macdSignalSeries`, `macdHistSeries`) and sub-chart instances (`rsiChartInstance`, `macdChartInstance`) when drawing a new symbol to avoid canvas duplication or leaking memory.
 - Add indicator checkboxes change listeners to call `updateSymbolCharts()` or `toggleIndicatorPanes()`.
 
-### Step 1.2: Add Bollinger Bands & WMA 20 Overlays on Main Chart
+### Step 1.2: Add Bollinger Bands & WMA 20 Overlays on Main Chart [COMPLETED]
 - Compute WMA 20 using `calculateWMA(ratioData, 20)`.
 - Compute Bollinger Bands (20, 2) using `calculateBollingerBands(ratioData, 20, 2)`.
 - If the WMA/Bollinger Bands options are toggled, show the line overlays directly on `ratioChartInstance`.
 
-### Step 1.3: Initialize and Sync RSI / MACD Sub-Charts
+### Step 1.3: Initialize and Sync RSI / MACD Sub-Charts [COMPLETED]
 - When the RSI or MACD checkbox is enabled:
   - Create the sub-chart instances (`rsiChartInstance`, `macdChartInstance`) using `LightweightCharts.createChart` in `#rsiChartDiv` and `#macdChartDiv`.
   - Populate them with calculated RSI (`calculateRSI`) or MACD (`calculateMACD`) series.
@@ -27,16 +27,16 @@ Integrate WMA 20, Bollinger Bands (20, 2), RSI 14, and MACD (12, 26, 9) indicato
 
 ---
 
-## Phase 2: Interactive Alert Settings Panel (Settings UI)
+## Phase 2: Interactive Alert Settings Panel (Settings UI) [COMPLETED]
 
 Provide a secure and user-friendly interface to manage threshold settings and Telegram bot details.
 
-### Step 2.1: Implement Settings API in FastAPI (`src/tvcli/floatdash/app.py`)
+### Step 2.1: Implement Settings API in FastAPI (`src/tvcli/floatdash/app.py`) [COMPLETED]
 - **`GET /api/settings`**: Read settings from `config.toml` (XDG config directory) and return them as JSON. Sensitive keys (like Telegram token) should be partially masked for display.
 - **`POST /api/settings/update`**: Accept JSON payload, validate types/formats, write updated values back to `config.toml`, and reload configuration in the running server.
 - **`POST /api/settings/test`**: Trigger a test Telegram or webhook alert using the unsaved (or saved) credentials to verify connectivity.
 
-### Step 2.2: Add Settings Tab/Modal to HTML UI
+### Step 2.2: Add Settings Tab/Modal to HTML UI [COMPLETED]
 - Build a tabbed navigation system in the dashboard header: **"Dashboard"** and **"Settings (Ayarlar)"**.
 - Style the Settings form using existing dark mode CSS tokens:
   - Fields for: Telegram Bot Token, Telegram Chat ID, Webhook URL, Severe Low Float Threshold (%), and Ratio Change Alarm Threshold (%).
@@ -44,15 +44,15 @@ Provide a secure and user-friendly interface to manage threshold settings and Te
 
 ---
 
-## Phase 3: Alert History Log Table (Alert History)
+## Phase 3: Alert History Log Table (Alert History) [COMPLETED]
 
 Enable users to audit past alerts and filter them directly inside the web UI.
 
-### Step 3.1: SQLite History Table & API Route
+### Step 3.1: SQLite History Table & API Route [COMPLETED]
 - Query the existing SQLite database (or log file) for sent alert history.
 - **`GET /api/alerts/history`**: Return JSON list of past alerts sorted by date descending, supporting optional query parameters for filtering by symbol, severity (High, Info), and delivery channel (Telegram, Webhook).
 
-### Step 3.2: Render Alert Logs Table in UI
+### Step 3.2: Render Alert Logs Table in UI [COMPLETED]
 - Add an **"Alerts (Alarm Geçmişi)"** tab to the dashboard.
 - Create a responsive data table using HTML and standard CSS:
   - Columns: Timestamp, Symbol, Alarm Description, Ratio Value, Severity (rendered with badge colors), Status (Success / Failed).

@@ -61,6 +61,7 @@ def seed_db(
         conn.execute("DELETE FROM freefloat_symbol_summary")
         conn.execute("DELETE FROM freefloat_symbol_metadata")
         conn.execute("DELETE FROM sync_state")
+        conn.execute("DELETE FROM kap_disclosures")
 
     # 2. Select / Generate symbols
     selected_symbols: list[tuple[str, str, str, str]] = []
@@ -101,6 +102,7 @@ def seed_db(
 
     # 5. Populate day by day
     reports_synced = 0
+    kap_to_insert: list[tuple[str, str, str, str, str, str]] = []
     for day in dates:
         day_records: list[freefloat.FloatRecord] = []
         date_label = day.strftime("%d.%m.%Y")
@@ -113,6 +115,26 @@ def seed_db(
             if code == jump_symbol:
                 delta = random.choice([-8.0, 7.5, -12.0, 6.0])
                 ratios[code] = max(1.0, min(99.0, ratios[code] + delta))
+
+                # Create a mock KAP disclosure
+                title = random.choice(
+                    [
+                        "Fiili Dolaşım Pay Oranı Değişikliği",
+                        "Pay Satış Bilgi Formu",
+                        "Sermaye Artırımı Tescili",
+                    ]
+                )
+                summary = (
+                    "Şirketimizin fiili dolaşım pay oranı, ortakların pay "
+                    "işlemleri veya sermaye değişiklikleri kapsamında "
+                    f"güncellenmiştir. Güncel oran %{ratios[code]:.2f} "
+                    "olarak gerçekleşmiştir."
+                )
+                rand_id = random.randint(100000, 999999)
+                url = f"https://www.kap.org.tr/tr/Bildirim/{rand_id}"
+                kap_to_insert.append(
+                    (code, day.isoformat(), title, summary, url, now_iso)
+                )
             else:
                 ratios[code] = max(
                     1.0, min(99.0, ratios[code] + random.uniform(-0.3, 0.3))
@@ -138,10 +160,23 @@ def seed_db(
         store.sync_records(tuple(day_records))
         reports_synced += 1
 
+    # Insert mock KAP disclosures in a single connection block
+    with store._connect() as conn:
+        for item in kap_to_insert:
+            conn.execute(
+                """
+                INSERT INTO kap_disclosures
+                (code, disclosure_date, title, summary, url, fetched_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                item,
+            )
+
     payload = {
         "success": True,
         "reports_synced": reports_synced,
         "symbols_count": len(selected_symbols),
         "days_count": days_count,
+        "kap_disclosures_seeded": len(kap_to_insert),
     }
     emit(build_envelope(command="dev.seed-db", data=payload), json_mode=json_mode)

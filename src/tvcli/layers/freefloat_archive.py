@@ -218,6 +218,19 @@ class ArchiveStore:
                     industry TEXT,
                     updated_at TEXT NOT NULL
                 );
+
+                CREATE TABLE IF NOT EXISTS kap_disclosures (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    code TEXT NOT NULL,
+                    disclosure_date TEXT NOT NULL,
+                    title TEXT NOT NULL,
+                    summary TEXT,
+                    url TEXT,
+                    fetched_at TEXT NOT NULL
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_kap_disclosures_code_date
+                ON kap_disclosures(code, disclosure_date);
                 """
             )
             try:
