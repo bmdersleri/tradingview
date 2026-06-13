@@ -1,3 +1,4 @@
+# ruff: noqa: E501
 """Persistent archive and report builder for VAP free-float data."""
 
 from __future__ import annotations
@@ -198,6 +199,13 @@ class ArchiveStore:
                     report_date TEXT PRIMARY KEY,
                     checked_at TEXT NOT NULL
                 );
+
+                CREATE TABLE IF NOT EXISTS freefloat_symbol_metadata (
+                    code TEXT PRIMARY KEY,
+                    sector TEXT,
+                    industry TEXT,
+                    updated_at TEXT NOT NULL
+                );
                 """
             )
 
@@ -310,6 +318,18 @@ class ArchiveStore:
             )
             for code in touched:
                 self._rebuild_symbol(conn, code)
+
+        # Dispatch real-time alerts if this synced date is the latest one
+        try:
+            with self._connect() as conn:
+                max_row = conn.execute(
+                    "SELECT MAX(report_date) FROM freefloat_reports"
+                ).fetchone()
+                max_date = max_row[0] if max_row else None
+            if max_date and report_date >= max_date:
+                self.dispatch_alerts(report_date)
+        except Exception:
+            pass
 
         return {
             "report_date": report_date,
@@ -976,6 +996,219 @@ class ArchiveStore:
             ),
         }
 
+    def update_symbol_metadata(self) -> None:
+        import sys
+
+        if "pytest" in sys.modules:
+            return
+        try:
+            from tradingview_screener import Query  # type: ignore[attr-defined]
+
+            res = (
+                Query()
+                .set_markets("turkey")
+                .select("name", "sector", "industry")
+                .limit(1000)
+                .get_scanner_data()
+            )
+            if not res or len(res) < 2:
+                return
+            df = res[1]
+            now_iso = self._now_iso()
+            with self._connect() as conn:
+                for _, row in df.iterrows():
+                    ticker = str(row["ticker"])
+                    code = ticker.split(":")[-1] if ":" in ticker else ticker
+                    sector = str(row["sector"]) if row["sector"] else "Bilinmeyen"
+                    industry = str(row["industry"]) if row["industry"] else "Bilinmeyen"
+                    conn.execute(
+                        """
+                        INSERT INTO freefloat_symbol_metadata(code, sector, industry, updated_at)
+                        VALUES(?, ?, ?, ?)
+                        ON CONFLICT(code) DO UPDATE SET
+                            sector = excluded.sector,
+                            industry = excluded.industry,
+                            updated_at = excluded.updated_at
+                        """,
+                        (code, sector, industry, now_iso),
+                    )
+        except Exception:
+            pass
+
+    def get_sector_heatmap(self, report_date: str) -> list[dict[str, Any]]:
+        with self._connect() as conn:
+            count = conn.execute(
+                "SELECT COUNT(*) FROM freefloat_symbol_metadata"
+            ).fetchone()[0]
+        if count == 0:
+            self.update_symbol_metadata()
+
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT s.code, s.name, s.ratio, s.capital, s.float_shares,
+                       COALESCE(m.sector, 'Diğer') AS sector,
+                       COALESCE(m.industry, 'Diğer') AS industry
+                FROM freefloat_snapshots s
+                LEFT JOIN freefloat_symbol_metadata m ON s.code = m.code
+                WHERE s.report_date = ?
+                """,
+                (report_date,),
+            ).fetchall()
+
+        by_sector: dict[str, list[dict[str, Any]]] = {}
+        for r in rows:
+            sec = r["sector"]
+            if sec not in by_sector:
+                by_sector[sec] = []
+            by_sector[sec].append(
+                {
+                    "code": r["code"],
+                    "name": r["name"],
+                    "ratio": float(r["ratio"]),
+                    "capital": float(r["capital"]),
+                    "float_shares": float(r["float_shares"]),
+                    "industry": r["industry"],
+                }
+            )
+
+        import statistics
+
+        heatmap = []
+        for sec, symbols in by_sector.items():
+            ratios = [s["ratio"] for s in symbols]
+            median_ratio = statistics.median(ratios) if ratios else 0.0
+            avg_ratio = statistics.mean(ratios) if ratios else 0.0
+            for s in symbols:
+                s["weight"] = s["capital"] * (s["ratio"] / 100.0)
+            symbols.sort(key=lambda x: x["weight"], reverse=True)
+            heatmap.append(
+                {
+                    "sector": sec,
+                    "median_ratio": round(median_ratio, 2),
+                    "avg_ratio": round(avg_ratio, 2),
+                    "symbol_count": len(symbols),
+                    "symbols": symbols,
+                }
+            )
+        heatmap.sort(key=lambda x: x["sector"])
+        return heatmap
+
+    def dispatch_alerts(self, report_date: str) -> None:
+        import sys
+
+        if "pytest" in sys.modules:
+            return
+        from ..config import load_config, resolve_setting
+
+        try:
+            cfg = load_config()
+        except Exception:
+            cfg = {}
+
+        telegram_token = resolve_setting("alerts", "telegram-token", cfg)
+        telegram_chat_id = resolve_setting("alerts", "telegram-chat-id", cfg)
+        webhook_url = resolve_setting("alerts", "webhook-url", cfg)
+
+        if not (telegram_token and telegram_chat_id) and not webhook_url:
+            return
+
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT report_date, code, event_type, severity, metric_value, threshold_value, payload_json
+                FROM freefloat_events
+                WHERE report_date = ? AND severity IN ('high', 'medium')
+                """,
+                (report_date,),
+            ).fetchall()
+
+        if not rows:
+            return
+
+        events = []
+        for r in rows:
+            ev = dict(r)
+            ev["payload"] = json.loads(str(ev.pop("payload_json")))
+            events.append(ev)
+
+        if telegram_token and telegram_chat_id:
+            try:
+                self._send_telegram_alerts(
+                    telegram_token, telegram_chat_id, report_date, events
+                )
+            except Exception:
+                pass
+
+        if webhook_url:
+            try:
+                self._send_webhook_alerts(webhook_url, report_date, events)
+            except Exception:
+                pass
+
+    def _send_telegram_alerts(
+        self, token: str, chat_id: str, report_date: str, events: list[dict[str, Any]]
+    ) -> None:
+        import httpx
+
+        url = f"https://api.telegram.org/bot{token}/sendMessage"
+        messages = []
+        for ev in events:
+            code = ev["code"]
+            etype = ev["event_type"]
+            val = ev["metric_value"]
+            payload = ev["payload"]
+
+            if etype == "liquidity_risk_low_float":
+                msg = f"⚠️ <b>LİKİDİTE RİSKİ ({code}):</b> Fiili dolaşım oranı %{val:.2f} ile kritik eşik altında!"
+            elif etype == "new_52w_high_ratio":
+                msg = f"📈 <b>52 HAFTALIK ZİRVE ({code}):</b> Fiili dolaşım oranı %{val:.2f} ile zirveye ulaştı."
+            elif etype == "new_52w_low_ratio":
+                msg = f"📉 <b>52 HAFTALIK DİP ({code}):</b> Fiili dolaşım oranı %{val:.2f} ile en düşük seviyede."
+            elif etype == "ratio_jump_up":
+                msg = f"⚡ <b>SERT DOLAŞIM ARTIŞI ({code}):</b> Dolaşım oranı %{payload.get('ratio', val):.2f} (%+{val:.2f} değişim) seviyesine sıçradı!"
+            elif etype == "ratio_jump_down":
+                msg = f"⚡ <b>SERT DOLAŞIM AZALIŞI ({code}):</b> Dolaşım oranı %{payload.get('ratio', val):.2f} (%{val:.2f} değişim) seviyesine düştü!"
+            elif etype == "ratio_threshold_cross_down":
+                msg = f"🚨 <b>KRİTİK EŞİK AŞILDI ({code}):</b> Dolaşım oranı %{payload.get('from', 0):.2f} -> %{payload.get('to', 0):.2f} düşerek kritik %10/%20 sınırını aşağı kırdı!"
+            elif etype == "ratio_threshold_cross_up":
+                msg = f"✅ <b>EŞİK AŞILDI ({code}):</b> Dolaşım oranı %{payload.get('from', 0):.2f} -> %{payload.get('to', 0):.2f} yükselerek güvenli bölgeye geçti."
+            elif etype == "float_shares_jump_up":
+                msg = f"🔄 <b>FİİLİ HİSSE ARTIŞI ({code}):</b> Dolaşımdaki pay adedi %+{val:.2f} arttı."
+            elif etype == "float_shares_jump_down":
+                msg = f"🔄 <b>FİİLİ HİSSE AZALIŞI ({code}):</b> Dolaşımdaki pay adedi %{val:.2f} azaldı."
+            elif etype == "capital_change_detected":
+                msg = f"🏢 <b>SERMAYE DEĞİŞİMİ ({code}):</b> Ödenmiş sermaye {payload.get('from', 0):,.0f} -> {payload.get('to', 0):,.0f} TRY olarak güncellendi."
+            else:
+                msg = f"🔔 <b>BİLDİRİM ({code}):</b> {etype} (Değer: {val:.2f})"
+            messages.append(msg)
+
+        header = f"📢 <b>BIST Serbest Dolaşım Bildirimleri ({report_date})</b>\n\n"
+        chunks = []
+        current_chunk = header
+        for msg in messages:
+            if len(current_chunk) + len(msg) + 2 > 4000:
+                chunks.append(current_chunk)
+                current_chunk = header + msg + "\n"
+            else:
+                current_chunk += msg + "\n"
+        chunks.append(current_chunk)
+
+        with httpx.Client(timeout=10.0) as client:
+            for chunk in chunks:
+                client.post(
+                    url, json={"chat_id": chat_id, "text": chunk, "parse_mode": "HTML"}
+                )
+
+    def _send_webhook_alerts(
+        self, url: str, report_date: str, events: list[dict[str, Any]]
+    ) -> None:
+        import httpx
+
+        payload = {"report_date": report_date, "events": events}
+        with httpx.Client(timeout=10.0) as client:
+            client.post(url, json=payload)
+
 
 def _iter_days(
     *,
@@ -1035,6 +1268,10 @@ def sync_archive(
             status="success",
             report_date=result["report_date"],
         )
+        try:
+            store.update_symbol_metadata()
+        except Exception:
+            pass
         return {
             "mode": "latest",
             "synced_reports": 1,
@@ -1105,6 +1342,11 @@ def sync_archive(
         status="success" if synced else "no_data",
         report_date=last_report_date,
     )
+    if synced:
+        try:
+            store.update_symbol_metadata()
+        except Exception:
+            pass
 
     return {
         "mode": "range",

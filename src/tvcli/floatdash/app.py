@@ -6,10 +6,11 @@ from __future__ import annotations
 import atexit
 import shutil
 import tempfile
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, HTTPException, status
+from fastapi import BackgroundTasks, FastAPI, HTTPException, status
 from fastapi.responses import FileResponse, HTMLResponse
 
 from ..layers import freefloat_archive
@@ -416,6 +417,12 @@ def create_app(store: freefloat_archive.ArchiveStore | None = None) -> FastAPI:
             grid-template-columns: 1fr;
             gap: 1.5rem;
         }
+
+        @keyframes pulse {
+            0% { opacity: 0.4; }
+            50% { opacity: 1.0; }
+            100% { opacity: 0.4; }
+        }
     </style>
 </head>
 <body>
@@ -423,6 +430,11 @@ def create_app(store: freefloat_archive.ArchiveStore | None = None) -> FastAPI:
         <div class="logo-container">
             <span class="logo-icon">📊</span>
             <span class="logo-title">BIST Free-Float Terminal</span>
+        </div>
+        <div id="syncStatusHeader" style="display: flex; align-items: center; gap: 0.6rem; font-size: 0.8rem; background-color: rgba(24, 28, 39, 0.6); border: 1px solid var(--border-color); padding: 0.35rem 0.75rem; border-radius: 6px; margin-right: auto; margin-left: 2rem;">
+            <span id="syncStatusDot" style="width: 8px; height: 8px; border-radius: 50%; background-color: var(--bullish); display: inline-block;"></span>
+            <span id="syncStatusText" style="color: var(--text-primary); font-weight: 500;">Veri Durumu Yükleniyor...</span>
+            <button id="syncNowBtn" onclick="triggerSync()" class="btn" style="padding: 0.15rem 0.5rem; font-size: 0.75rem; border-radius: 4px; line-height: 1; margin-left: 0.5rem;">Eşitle</button>
         </div>
         <div class="search-container">
             <div style="position: relative; display: flex; align-items: center;">
@@ -521,23 +533,51 @@ def create_app(store: freefloat_archive.ArchiveStore | None = None) -> FastAPI:
 
                 <!-- Symbol Charts Container -->
                 <div id="symbolChartsContainer" style="display: none; flex-direction: column; gap: 1rem; width: 100%;">
-                    <!-- Chart Settings Toggles -->
-                    <div style="display: flex; gap: 1.5rem; align-items: center; background-color: rgba(24, 28, 39, 0.4); border: 1px solid var(--border-color); border-radius: 8px; padding: 0.5rem 1rem; font-size: 0.85rem;">
-                        <span style="font-weight: 600; color: var(--text-secondary);">GÖSTERGELER:</span>
-                        <label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer; user-select: none;">
-                            <input type="checkbox" id="toggleSma" checked onchange="updateSymbolCharts()" /> SMA 20 (Sarı)
-                        </label>
-                        <label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer; user-select: none;">
-                            <input type="checkbox" id="toggleEma" checked onchange="updateSymbolCharts()" /> EMA 20 (Mor)
-                        </label>
-                        <label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer; user-select: none;">
-                            <input type="checkbox" id="toggleThresholds" checked onchange="updateSymbolCharts()" /> Eşik Çizgileri (%10 & %20)
-                        </label>
+                    <!-- Chart Settings Toggles & Comparison Input -->
+                    <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 1rem; background-color: rgba(24, 28, 39, 0.4); border: 1px solid var(--border-color); border-radius: 8px; padding: 0.5rem 1rem; font-size: 0.85rem;">
+                        <div style="display: flex; gap: 1.5rem; align-items: center;">
+                            <span style="font-weight: 600; color: var(--text-secondary);">GÖSTERGELER:</span>
+                            <label id="lblSma" style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer; user-select: none;">
+                                <input type="checkbox" id="toggleSma" checked onchange="updateSymbolCharts()" /> SMA 20 (Sarı)
+                            </label>
+                            <label id="lblEma" style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer; user-select: none;">
+                                <input type="checkbox" id="toggleEma" checked onchange="updateSymbolCharts()" /> EMA 20 (Mor)
+                            </label>
+                            <label id="lblThresholds" style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer; user-select: none;">
+                                <input type="checkbox" id="toggleThresholds" checked onchange="updateSymbolCharts()" /> Eşik Çizgileri (%10 & %20)
+                            </label>
+                        </div>
+                        <div style="display: flex; gap: 0.5rem; align-items: center;">
+                            <span style="font-weight: 600; color: var(--text-secondary);">KARŞILAŞTIRMA:</span>
+                            <input type="text" id="compareSearchInput" placeholder="Hisse kodu..." onkeypress="if(event.key==='Enter') addCompareSymbol()" style="background-color: #1e222d; border: 1px solid var(--border-color); color: var(--text-primary); padding: 0.25rem 0.5rem; border-radius: 4px; outline: none; width: 100px; font-family: inherit; font-size: 0.8rem;" />
+                            <button onclick="addCompareSymbol()" class="btn" style="padding: 0.25rem 0.5rem; font-size: 0.8rem; border-radius: 4px;">Ekle</button>
+                        </div>
+                    </div>
+
+                    <!-- Comparison chips display -->
+                    <div id="compareListContainer" style="display: none; align-items: center; gap: 0.75rem; background-color: rgba(24, 28, 39, 0.2); border: 1px solid var(--border-color); border-radius: 8px; padding: 0.5rem 1rem; font-size: 0.85rem;">
+                        <span style="font-weight: 600; color: var(--text-secondary);">KARŞILAŞTIRILAN HİSSELER:</span>
+                        <div id="compareList" style="display: flex; gap: 0.5rem; flex-wrap: wrap; align-items: center;"></div>
                     </div>
 
                     <!-- Chart Divs -->
                     <div id="ratioChartDiv" style="width: 100%; height: 320px; border-radius: 8px; overflow: hidden; border: 1px solid var(--border-color);"></div>
                     <div id="sharesChartDiv" style="width: 100%; height: 160px; border-radius: 8px; overflow: hidden; border: 1px solid var(--border-color);"></div>
+                </div>
+            </div>
+
+            <!-- Sektörel Dağılım & Isı Haritası (Heatmap) -->
+            <div id="sectorHeatmapCard" class="card" style="margin-top: 0rem;">
+                <h3 style="margin-bottom: 0.5rem; display: flex; align-items: center; justify-content: space-between; font-size: 1.05rem;">
+                    <span style="display: flex; align-items: center; gap: 0.5rem; color: var(--accent-color);">
+                        <span>🔥</span> Sektörel Likidite & Dolaşım Isı Haritası
+                    </span>
+                    <span style="font-size: 0.75rem; font-weight: normal; color: var(--text-secondary);">
+                        Bloklar serbest dolaşımdaki nominal sermaye büyüklüğünü, renkler ise oran durumunu (<span style="color: var(--bearish); font-weight: bold;">%10 Altı Kritik</span>, <span style="color: var(--warning); font-weight: bold;">%10-%20 Riskli</span>, <span style="color: var(--bullish); font-weight: bold;">%20+ Normal</span>) temsil eder.
+                    </span>
+                </h3>
+                <div id="sectorHeatmapGrid" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 1rem; margin-top: 1rem; max-height: 400px; overflow-y: auto; padding-right: 0.25rem;">
+                    <p style="text-align: center; color: var(--text-secondary); padding: 2rem; grid-column: 1 / -1;">Sektör verileri yükleniyor...</p>
                 </div>
             </div>
 
@@ -657,6 +697,10 @@ def create_app(store: freefloat_archive.ArchiveStore | None = None) -> FastAPI:
     <script>
         let activeCode = 'MARKET';
         let cachedMarketData = null;
+        let activeSymbolData = null;
+        let compareSymbols = [];
+        let compareDataStore = {};
+        const compareColors = ['#ef5350', '#ffaa00', '#9c27b0', '#00b0ff'];
 
         let ratioChartInstance = null;
         let sharesChartInstance = null;
@@ -1208,6 +1252,7 @@ def create_app(store: freefloat_archive.ArchiveStore | None = None) -> FastAPI:
             document.getElementById('marketInsightsContainer').style.display = 'grid';
             document.getElementById('marketChartsContainer').style.display = 'grid';
             document.getElementById('marketEventsCard').style.display = 'block';
+            document.getElementById('sectorHeatmapCard').style.display = 'block';
 
             document.querySelectorAll('.leaderboard-item').forEach(item => item.classList.remove('active'));
             document.getElementById('item-market').classList.add('active');
@@ -1216,6 +1261,11 @@ def create_app(store: freefloat_archive.ArchiveStore | None = None) -> FastAPI:
             if (cachedMarketData) {
                 createMarketCharts(cachedMarketData);
             }
+            // Fetch sector heatmap data
+            fetch('/api/market/sectors')
+                .then(r => r.ok ? r.json() : [])
+                .then(sectors => renderSectorHeatmap(sectors))
+                .catch(err => console.error("Failed to load sectors heatmap:", err));
         }
 
         async function loadSymbol(code) {
@@ -1225,7 +1275,21 @@ def create_app(store: freefloat_archive.ArchiveStore | None = None) -> FastAPI:
             document.getElementById('marketInfoBar').style.display = 'none';
             document.getElementById('marketInsightsContainer').style.display = 'none';
             document.getElementById('marketChartsContainer').style.display = 'none';
+            document.getElementById('sectorHeatmapCard').style.display = 'none';
             
+            // Clear comparison list
+            compareSymbols = [];
+            compareDataStore = {};
+            renderComparisonChips();
+            const lblSma = document.getElementById('lblSma');
+            const lblEma = document.getElementById('lblEma');
+            const lblThresholds = document.getElementById('lblThresholds');
+            const sharesDiv = document.getElementById('sharesChartDiv');
+            if (lblSma) lblSma.style.display = 'flex';
+            if (lblEma) lblEma.style.display = 'flex';
+            if (lblThresholds) lblThresholds.style.display = 'flex';
+            if (sharesDiv) sharesDiv.style.display = 'block';
+
             document.getElementById('symbolEventsCard').style.display = 'block';
             document.getElementById('symbolChartsContainer').style.display = 'flex';
 
@@ -1246,6 +1310,7 @@ def create_app(store: freefloat_archive.ArchiveStore | None = None) -> FastAPI:
                     return;
                 }
                 const data = await response.json();
+                activeSymbolData = data;
 
                 document.getElementById('infoSymbol').innerText = `${data.identity.code} / ${data.identity.name}`;
                 document.getElementById('infoRatio').innerText = `${data.latest.ratio.toFixed(2)}%`;
@@ -1344,6 +1409,385 @@ def create_app(store: freefloat_archive.ArchiveStore | None = None) -> FastAPI:
                 searchSymbol();
             }
         });
+
+        // ----------------------------------------------------
+        // COMPARISON ENGINE
+        // ----------------------------------------------------
+        async function addCompareSymbol() {
+            const input = document.getElementById('compareSearchInput');
+            const code = input.value.trim().toUpperCase();
+            if (!code) return;
+            input.value = '';
+
+            if (code === activeCode) {
+                alert("Bir hisseyi kendisiyle karşılaştıramazsınız.");
+                return;
+            }
+            if (compareSymbols.includes(code)) {
+                return;
+            }
+            if (compareSymbols.length >= 4) {
+                alert("En fazla 4 hisseyi karşılaştırma listesine ekleyebilirsiniz.");
+                return;
+            }
+
+            showLoader(`Loading comparison data for ${code}...`);
+            try {
+                const response = await fetch(`/api/symbol/${code}`);
+                if (!response.ok) {
+                    hideLoader();
+                    alert(`Hisse verisi alınamadı: ${code}`);
+                    return;
+                }
+                const data = await response.json();
+                compareDataStore[code] = data;
+                compareSymbols.push(code);
+                
+                hideLoader();
+                renderComparisonChips();
+                renderComparisonChart();
+            } catch (err) {
+                hideLoader();
+                console.error("Comparison load failed:", err);
+                alert(`Hisse verisi yüklenirken hata oluştu: ${code}`);
+            }
+        }
+
+        function removeCompareSymbol(code) {
+            compareSymbols = compareSymbols.filter(c => c !== code);
+            delete compareDataStore[code];
+            renderComparisonChips();
+            renderComparisonChart();
+        }
+
+        function renderComparisonChips() {
+            const container = document.getElementById('compareListContainer');
+            const list = document.getElementById('compareList');
+            list.innerHTML = '';
+
+            if (compareSymbols.length === 0) {
+                container.style.display = 'none';
+                return;
+            }
+
+            container.style.display = 'flex';
+
+            const mainChip = document.createElement('div');
+            mainChip.style = 'background-color: rgba(38, 166, 154, 0.15); border: 1px solid #26a69a; color: #26a69a; padding: 0.25rem 0.5rem; border-radius: 4px; font-size: 0.75rem; font-weight: 600; display: flex; align-items: center; gap: 0.25rem;';
+            mainChip.innerHTML = `<span style="width: 8px; height: 8px; border-radius: 50%; background-color: #26a69a; display: inline-block;"></span> ${activeCode}`;
+            list.appendChild(mainChip);
+
+            compareSymbols.forEach((c, idx) => {
+                const color = compareColors[idx % compareColors.length];
+                const chip = document.createElement('div');
+                chip.style = `background-color: rgba(255,255,255,0.05); border: 1px solid ${color}; color: ${color}; padding: 0.25rem 0.5rem; border-radius: 4px; font-size: 0.75rem; font-weight: 600; display: flex; align-items: center; gap: 0.25rem;`;
+                chip.innerHTML = `
+                    <span style="width: 8px; height: 8px; border-radius: 50%; background-color: ${color}; display: inline-block;"></span>
+                    ${c}
+                    <span onclick="removeCompareSymbol('${c}')" style="cursor: pointer; margin-left: 0.25rem; font-weight: bold; font-size: 0.85rem;">&times;</span>
+                `;
+                list.appendChild(chip);
+            });
+        }
+
+        function renderComparisonChart() {
+            const lblSma = document.getElementById('lblSma');
+            const lblEma = document.getElementById('lblEma');
+            const lblThresholds = document.getElementById('lblThresholds');
+            const sharesDiv = document.getElementById('sharesChartDiv');
+
+            if (compareSymbols.length === 0) {
+                if (lblSma) lblSma.style.display = 'flex';
+                if (lblEma) lblEma.style.display = 'flex';
+                if (lblThresholds) lblThresholds.style.display = 'flex';
+                sharesDiv.style.display = 'block';
+                if (activeCode && activeCode !== 'MARKET') {
+                    loadSymbol(activeCode);
+                }
+                return;
+            }
+
+            if (lblSma) lblSma.style.display = 'none';
+            if (lblEma) lblEma.style.display = 'none';
+            if (lblThresholds) lblThresholds.style.display = 'none';
+            sharesDiv.style.display = 'none';
+
+            if (ratioChartInstance) {
+                ratioChartInstance.remove();
+                ratioChartInstance = null;
+            }
+            if (sharesChartInstance) {
+                sharesChartInstance.remove();
+                sharesChartInstance = null;
+            }
+
+            const ratioContainer = document.getElementById('ratioChartDiv');
+            const chartOptions = {
+                layout: {
+                    background: { type: 'solid', color: '#181c27' },
+                    textColor: '#d1d4dc',
+                    fontFamily: "'Outfit', sans-serif",
+                },
+                grid: {
+                    vertLines: { color: 'rgba(42, 46, 57, 0.15)', style: 3 },
+                    horzLines: { color: 'rgba(42, 46, 57, 0.15)', style: 3 },
+                },
+                rightPriceScale: {
+                    borderColor: 'rgba(42, 46, 57, 0.3)',
+                },
+                timeScale: {
+                    borderColor: 'rgba(42, 46, 57, 0.3)',
+                },
+            };
+
+            ratioChartInstance = LightweightCharts.createChart(ratioContainer, {
+                ...chartOptions,
+                width: ratioContainer.clientWidth || 800,
+                height: 380,
+            });
+
+            if (!activeSymbolData) return;
+
+            const mainDataSorted = [...activeSymbolData.recent_changes].reverse().map(item => {
+                return {
+                    time: parseDateToISO(item.report_date),
+                    value: item.ratio
+                };
+            }).filter(d => d.time);
+
+            const mainSeries = ratioChartInstance.addLineSeries({
+                color: '#26a69a',
+                lineWidth: 2.5,
+                title: activeCode,
+                priceFormat: {
+                    type: 'custom',
+                    formatter: price => price.toFixed(2) + '%',
+                },
+            });
+            mainSeries.setData(mainDataSorted);
+
+            compareSymbols.forEach((c, idx) => {
+                const color = compareColors[idx % compareColors.length];
+                const symData = compareDataStore[c];
+                if (!symData) return;
+
+                const sortedSymData = [...symData.recent_changes].reverse().map(item => {
+                    return {
+                        time: parseDateToISO(item.report_date),
+                        value: item.ratio
+                    };
+                }).filter(d => d.time);
+
+                const series = ratioChartInstance.addLineSeries({
+                    color: color,
+                    lineWidth: 2.0,
+                    title: c,
+                    priceFormat: {
+                        type: 'custom',
+                        formatter: price => price.toFixed(2) + '%',
+                    },
+                });
+                series.setData(sortedSymData);
+            });
+
+            ratioChartInstance.timeScale().fitContent();
+        }
+
+        // ----------------------------------------------------
+        // SECTOR HEATMAP ENGINE
+        // ----------------------------------------------------
+        function renderSectorHeatmap(sectors) {
+            const grid = document.getElementById('sectorHeatmapGrid');
+            grid.innerHTML = '';
+            
+            if (!sectors || sectors.length === 0) {
+                grid.innerHTML = '<p style="text-align: center; color: var(--text-secondary); padding: 2rem; grid-column: 1 / -1;">Sektör verisi bulunamadı. Lütfen önce veri eşitlemesi yapın.</p>';
+                return;
+            }
+
+            function formatVolume(val) {
+                if (val >= 1e9) return (val / 1e9).toFixed(2) + ' Milyar';
+                if (val >= 1e6) return (val / 1e6).toFixed(2) + ' Milyon';
+                return val.toLocaleString();
+            }
+
+            sectors.forEach(sec => {
+                const card = document.createElement('div');
+                card.style = 'background-color: rgba(24, 28, 39, 0.3); border: 1px solid var(--border-color); border-radius: 8px; padding: 1rem; display: flex; flex-direction: column; gap: 0.75rem;';
+                
+                const header = document.createElement('div');
+                header.style = 'display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid rgba(255, 255, 255, 0.05); padding-bottom: 0.5rem;';
+                
+                const title = document.createElement('span');
+                title.style = 'font-weight: 600; font-size: 0.85rem; color: var(--text-primary); text-transform: uppercase;';
+                title.innerText = sec.sector === 'Bilinmeyen' ? 'DİĞER SEKTÖRLER' : sec.sector;
+                
+                const stats = document.createElement('span');
+                stats.style = 'font-size: 0.8rem; font-weight: 600;';
+                let medColor = 'var(--bullish)';
+                if (sec.median_ratio < 10.0) medColor = 'var(--bearish)';
+                else if (sec.median_ratio < 20.0) medColor = 'var(--warning)';
+                
+                stats.style.color = medColor;
+                stats.innerText = `Medyan: %${sec.median_ratio.toFixed(2)}`;
+                
+                header.appendChild(title);
+                header.appendChild(stats);
+                card.appendChild(header);
+                
+                const symbolsDiv = document.createElement('div');
+                symbolsDiv.style = 'display: flex; flex-wrap: wrap; gap: 0.4rem; align-content: flex-start;';
+                
+                sec.symbols.forEach(sym => {
+                    const box = document.createElement('div');
+                    let color = 'rgba(38, 166, 154, 0.1)';
+                    let borderColor = 'rgba(38, 166, 154, 0.3)';
+                    let textColor = '#d1d4dc';
+                    if (sym.ratio < 10.0) {
+                        color = 'rgba(239, 83, 80, 0.1)';
+                        borderColor = 'rgba(239, 83, 80, 0.3)';
+                        textColor = 'var(--bearish)';
+                    } else if (sym.ratio < 20.0) {
+                        color = 'rgba(245, 124, 0, 0.1)';
+                        borderColor = 'rgba(245, 124, 0, 0.3)';
+                        textColor = 'var(--warning)';
+                    }
+                    
+                    box.style = `background-color: ${color}; border: 1px solid ${borderColor}; color: ${textColor}; padding: 0.3rem 0.45rem; border-radius: 4px; font-size: 0.75rem; font-weight: 600; cursor: pointer; transition: all 0.2s; position: relative;`;
+                    box.title = `${sym.name}\nDolaşım Oranı: %${sym.ratio.toFixed(2)}\nDolaşımdaki Nominal Sermaye: ${formatVolume(sym.weight)} TRY`;
+                    box.innerText = sym.code;
+                    
+                    box.onclick = (e) => {
+                        e.stopPropagation();
+                        loadSymbol(sym.code);
+                    };
+                    
+                    box.onmouseover = () => {
+                        box.style.transform = 'scale(1.08)';
+                        box.style.boxShadow = '0 2px 8px rgba(0,0,0,0.5)';
+                        box.style.borderColor = textColor;
+                        box.style.backgroundColor = color.replace('0.1', '0.25');
+                    };
+                    box.onmouseout = () => {
+                        box.style.transform = 'scale(1)';
+                        box.style.boxShadow = 'none';
+                        box.style.borderColor = borderColor;
+                        box.style.backgroundColor = color;
+                    };
+                    
+                    symbolsDiv.appendChild(box);
+                });
+                
+                card.appendChild(symbolsDiv);
+                grid.appendChild(card);
+            });
+        }
+
+        // ----------------------------------------------------
+        // SYSTEM SYNC / STATUS ENGINE
+        // ----------------------------------------------------
+        let isSyncing = false;
+        let syncPollInterval = null;
+
+        async function updateSyncStatusHeader() {
+            try {
+                const response = await fetch('/api/sync/status');
+                if (!response.ok) return;
+                const data = await response.json();
+                
+                const dot = document.getElementById('syncStatusDot');
+                const text = document.getElementById('syncStatusText');
+                const btn = document.getElementById('syncNowBtn');
+                
+                const state = data.sync_state;
+                
+                if (state.last_status === 'running') {
+                    isSyncing = true;
+                    dot.style.backgroundColor = 'var(--warning)';
+                    dot.style.boxShadow = '0 0 8px var(--warning)';
+                    dot.style.animation = 'pulse 1.5s infinite';
+                    text.innerText = 'Veriler Eşitleniyor...';
+                    btn.disabled = true;
+                    btn.innerText = 'Eşitleniyor';
+                    
+                    if (!syncPollInterval) {
+                        syncPollInterval = setInterval(updateSyncStatusHeader, 3000);
+                    }
+                } else {
+                    isSyncing = false;
+                    if (syncPollInterval) {
+                        clearInterval(syncPollInterval);
+                        syncPollInterval = null;
+                        if (activeCode === 'MARKET') {
+                            location.reload();
+                        } else {
+                            loadSymbol(activeCode);
+                        }
+                    }
+                    
+                    dot.style.animation = 'none';
+                    dot.style.boxShadow = 'none';
+                    
+                    if (state.last_status === 'error') {
+                        dot.style.backgroundColor = 'var(--bearish)';
+                        text.innerText = 'Hata: Eşitleme başarısız';
+                    } else {
+                        dot.style.backgroundColor = 'var(--bullish)';
+                        text.innerText = data.last_report_date ? `Son Rapor: ${parseDateLabel(data.last_report_date)}` : 'Veriler Hazır';
+                    }
+                    
+                    if (data.cooldown_active) {
+                        btn.disabled = true;
+                        btn.innerText = `Eşitle (${data.cooldown_seconds_left}s)`;
+                    } else {
+                        btn.disabled = false;
+                        btn.innerText = 'Eşitle';
+                    }
+                }
+            } catch (err) {
+                console.error("Failed to fetch sync status:", err);
+            }
+        }
+
+        function parseDateLabel(isoDate) {
+            if (!isoDate) return '';
+            const parts = isoDate.split('-');
+            if (parts.length === 3) {
+                return `${parts[2]}.${parts[1]}.${parts[0]}`;
+            }
+            return isoDate;
+        }
+
+        async function triggerSync() {
+            if (isSyncing) return;
+            const btn = document.getElementById('syncNowBtn');
+            btn.disabled = true;
+            btn.innerText = 'İsteniyor...';
+            
+            try {
+                const response = await fetch('/api/sync/run', { method: 'POST' });
+                if (!response.ok) {
+                    alert("Eşitleme isteği başarısız oldu.");
+                    updateSyncStatusHeader();
+                    return;
+                }
+                const data = await response.json();
+                if (data.success) {
+                    updateSyncStatusHeader();
+                } else {
+                    alert(data.message);
+                    updateSyncStatusHeader();
+                }
+            } catch (err) {
+                console.error("Failed to start sync:", err);
+                alert("Eşitleme başlatılırken bağlantı hatası oluştu.");
+                updateSyncStatusHeader();
+            }
+        }
+
+        // Initialize status polling
+        updateSyncStatusHeader();
+        setInterval(updateSyncStatusHeader, 15000);
     </script>
 </body>
 </html>"""
@@ -1524,6 +1968,111 @@ def create_app(store: freefloat_archive.ArchiveStore | None = None) -> FastAPI:
                     status_code=status.HTTP_404_NOT_FOUND,
                     detail=str(e),
                 ) from e
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=str(e),
+            ) from e
+
+    @app.get("/api/market/sectors")
+    async def get_api_market_sectors() -> Any:
+        latest_date = get_latest_report_date()
+        if not latest_date:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="No archived free-float reports found.",
+            )
+        try:
+            return store.get_sector_heatmap(latest_date)
+        except Exception as e:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=str(e),
+            ) from e
+
+    @app.get("/api/sync/status")
+    async def get_api_sync_status() -> Any:
+        try:
+            stats = store.archive_stats()
+            sync_states = stats.get("sync_state", [])
+            vap_state = next((s for s in sync_states if s["source"] == "vap"), None)
+
+            if not vap_state:
+                vap_state = {
+                    "source": "vap",
+                    "last_attempt_at": None,
+                    "last_success_at": None,
+                    "last_report_date": None,
+                    "cooldown_until": None,
+                    "last_status": "never_run",
+                    "last_error": None,
+                }
+
+            cooldown_active = False
+            cooldown_seconds_left = 0
+            if vap_state.get("cooldown_until"):
+                try:
+                    cooldown_time = datetime.fromisoformat(vap_state["cooldown_until"])
+                    now = datetime.now(UTC)
+                    if cooldown_time > now:
+                        cooldown_active = True
+                        cooldown_seconds_left = int(
+                            (cooldown_time - now).total_seconds()
+                        )
+                except Exception:
+                    pass
+
+            return {
+                "sync_state": vap_state,
+                "cooldown_active": cooldown_active,
+                "cooldown_seconds_left": max(0, cooldown_seconds_left),
+                "last_report_date": stats.get("last_report_date"),
+                "reports_count": stats.get("reports"),
+                "symbols_count": stats.get("symbols"),
+            }
+        except Exception as e:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=str(e),
+            ) from e
+
+    def _bg_sync() -> None:
+        try:
+            from ..layers import freefloat_archive
+
+            freefloat_archive.sync_archive(
+                latest=True,
+                since=None,
+                until=None,
+                max_days=None,
+                resume=False,
+                store=store,
+            )
+        except Exception:
+            pass
+
+    @app.post("/api/sync/run")
+    async def run_api_sync(background_tasks: BackgroundTasks) -> Any:
+        try:
+            now = datetime.now(UTC)
+            with store._connect() as conn:
+                row = conn.execute(
+                    "SELECT cooldown_until FROM sync_state WHERE source = ?",
+                    ("vap",),
+                ).fetchone()
+                if row and row["cooldown_until"]:
+                    cooldown_time = datetime.fromisoformat(row["cooldown_until"])
+                    if cooldown_time > now:
+                        seconds_left = int((cooldown_time - now).total_seconds())
+                        return {
+                            "success": False,
+                            "message": f"Sync cooldown active. Try again in {seconds_left} seconds.",
+                            "cooldown_active": True,
+                            "cooldown_seconds_left": seconds_left,
+                        }
+
+            background_tasks.add_task(_bg_sync)
+            return {"success": True, "message": "Sync started in background."}
+        except Exception as e:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail=str(e),
